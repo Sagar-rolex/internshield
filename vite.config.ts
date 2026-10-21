@@ -1,7 +1,14 @@
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
-// Detect Vercel environment automatically to build for Vercel Serverless Functions (.vercel/output).
 export default defineConfig({
+  vite: {
+    preview: {
+      allowedHosts: ["internshieldai-frontend.onrender.com"],
+    },
+    server: {
+      allowedHosts: true,
+    },
+  },
   nitro: {
     preset: process.env.VERCEL ? "vercel" : (process.env.NITRO_PRESET ?? "vercel"),
     output: {
