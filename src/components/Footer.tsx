@@ -36,9 +36,13 @@ export function Footer() {
             <h4 className="font-semibold mb-3">Connect</h4>
             <div className="flex gap-3">
               {[Github, Twitter, Linkedin, Mail].map((Icon, i) => (
-                <a key={i} href="#" className="h-9 w-9 rounded-md bg-muted hover:bg-primary hover:text-primary-foreground flex items-center justify-center transition-colors">
+                <span
+                  key={i}
+                  className="h-9 w-9 rounded-md bg-muted flex items-center justify-center opacity-50"
+                  title="Social links are placeholders in the prototype"
+                >
                   <Icon className="h-4 w-4" />
-                </a>
+                </span>
               ))}
             </div>
           </div>

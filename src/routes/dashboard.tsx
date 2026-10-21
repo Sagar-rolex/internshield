@@ -1,152 +1,147 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
-import { Card } from "@/components/ui/card";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import {
+  Activity,
+  Building2,
+  FileWarning,
+  History,
+  PlusCircle,
+  Save,
+  Search,
+  ShieldCheck,
+} from "lucide-react";
+import { ProtectedRoute, useAuth } from "@/components/AuthProvider";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Shield, ShieldAlert, ShieldCheck, FileWarning, TrendingUp, Search, Ban } from "lucide-react";
-import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, ResponsiveContainer, Tooltip, Legend, CartesianGrid } from "recharts";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 
 export const Route = createFileRoute("/dashboard")({
-  head: () => ({
-    meta: [
-      { title: "Dashboard — Scam Statistics | ScamShield.AI" },
-      { name: "description", content: "Live statistics on detected job scams, verified jobs and user reports." },
-    ],
-  }),
-  component: Dashboard,
+  component: DashboardRoute,
 });
 
 const stats = [
-  { label: "Total Scams Detected", value: "12,847", icon: ShieldAlert, color: "text-destructive", bg: "bg-destructive/10" },
-  { label: "Verified Safe Jobs", value: "5,219", icon: ShieldCheck, color: "text-success", bg: "bg-success/10" },
-  { label: "User Reports", value: "2,341", icon: FileWarning, color: "text-warning", bg: "bg-warning/15" },
-  { label: "Detection Accuracy", value: "96.4%", icon: TrendingUp, color: "text-primary", bg: "bg-primary/10" },
+  { label: "Jobs Analyzed", value: "34", icon: Activity, tone: "bg-primary/10 text-primary" },
+  {
+    label: "Scam Reports Submitted",
+    value: "8",
+    icon: FileWarning,
+    tone: "bg-destructive/10 text-destructive",
+  },
+  { label: "Saved Results", value: "12", icon: Save, tone: "bg-accent/10 text-accent" },
+  {
+    label: "Verified Companies Checked",
+    value: "19",
+    icon: Building2,
+    tone: "bg-success/10 text-success",
+  },
 ];
 
-const categories = [
-  { name: "Fake Hiring", value: 4280 },
-  { name: "Pay-to-Apply", value: 3110 },
-  { name: "Pyramid", value: 1840 },
-  { name: "Data Theft", value: 2140 },
-  { name: "Investment", value: 1477 },
+const recent = [
+  { date: "12 Jul 2026", company: "TechNova Labs", risk: "Low", status: "Saved" },
+  { date: "11 Jul 2026", company: "FastCash Hiring", risk: "High", status: "Reported" },
+  { date: "09 Jul 2026", company: "BrightCareer Hub", risk: "Medium", status: "Reviewed" },
+  { date: "07 Jul 2026", company: "CampusEdge AI", risk: "Low", status: "Verified" },
 ];
 
-const monthly = [
-  { month: "Jan", scams: 820, verified: 320 },
-  { month: "Feb", scams: 940, verified: 380 },
-  { month: "Mar", scams: 1120, verified: 410 },
-  { month: "Apr", scams: 1320, verified: 460 },
-  { month: "May", scams: 1580, verified: 520 },
-  { month: "Jun", scams: 1810, verified: 590 },
-];
-
-const blacklist = [
-  { name: "FastCash Hiring", reports: 142, type: "Pay-to-Apply" },
-  { name: "Global Tech Solutions Pvt", reports: 98, type: "Fake Hiring" },
-  { name: "BrightCareer Hub", reports: 76, type: "Data Theft" },
-  { name: "EarnHome Networks", reports: 64, type: "Pyramid" },
-  { name: "Quick Profits Marketing", reports: 51, type: "Investment" },
-  { name: "WorkFromHome India Ltd", reports: 43, type: "Pay-to-Apply" },
-];
-
-const COLORS = ["oklch(0.7 0.22 280)", "oklch(0.78 0.18 195)", "oklch(0.72 0.22 320)", "oklch(0.72 0.2 155)", "oklch(0.75 0.2 30)"];
+function DashboardRoute() {
+  return (
+    <ProtectedRoute role="user">
+      <Dashboard />
+    </ProtectedRoute>
+  );
+}
 
 function Dashboard() {
-  const [search, setSearch] = useState("");
-  const filtered = blacklist.filter((b) => b.name.toLowerCase().includes(search.toLowerCase()));
-
+  const { user } = useAuth();
   return (
     <div className="container mx-auto px-4 py-12">
-      <div className="mb-10">
-        <Badge variant="outline" className="mb-3 border-primary/40 text-primary"><Shield className="h-3 w-3 mr-1.5" /> Analytics</Badge>
-        <h1 className="text-4xl md:text-5xl font-bold">Scam Detection <span className="text-gradient-cyber">Dashboard</span></h1>
-        <p className="text-muted-foreground mt-3">Real-time statistics from the ScamShield platform.</p>
+      <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <Badge variant="outline" className="mb-3 border-primary/40 text-primary">
+            <ShieldCheck className="mr-1.5 h-3 w-3" /> User Dashboard
+          </Badge>
+          <h1 className="text-4xl font-bold">
+            Welcome back, <span className="text-gradient-cyber">{user?.name.split(" ")[0]}</span>
+          </h1>
+          <p className="mt-2 text-muted-foreground">Your job-safety workspace is ready.</p>
+        </div>
+        <Badge className="bg-success/15 text-success hover:bg-success/15">Session Active</Badge>
       </div>
 
-      {/* Stat cards */}
-      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        {stats.map((s) => (
-          <Card key={s.label} className="p-6 hover:shadow-card transition-all">
-            <div className={`h-11 w-11 rounded-lg ${s.bg} flex items-center justify-center mb-3`}>
-              <s.icon className={`h-5 w-5 ${s.color}`} />
+      <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {stats.map((item) => (
+          <Card
+            key={item.label}
+            className="glass p-6 shadow-card transition-all hover:-translate-y-1"
+          >
+            <div
+              className={`mb-4 flex h-11 w-11 items-center justify-center rounded-lg ${item.tone}`}
+            >
+              <item.icon className="h-5 w-5" />
             </div>
-            <div className="text-3xl font-bold">{s.value}</div>
-            <div className="text-sm text-muted-foreground mt-1">{s.label}</div>
+            <div className="text-3xl font-bold">{item.value}</div>
+            <div className="mt-1 text-sm text-muted-foreground">{item.label}</div>
           </Card>
         ))}
       </div>
 
-      {/* Charts */}
-      <div className="grid lg:grid-cols-2 gap-6 mb-8">
-        <Card className="p-6">
-          <h3 className="font-semibold mb-1">Scam Categories</h3>
-          <p className="text-sm text-muted-foreground mb-4">Distribution by scam type</p>
-          <ResponsiveContainer width="100%" height={280}>
-            <PieChart>
-              <Pie data={categories} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} innerRadius={50} paddingAngle={3}>
-                {categories.map((_, i) => <Cell key={i} fill={COLORS[i]} />)}
-              </Pie>
-              <Tooltip contentStyle={{ background: "var(--popover)", border: "1px solid var(--border)", borderRadius: 8 }} />
-              <Legend />
-            </PieChart>
-          </ResponsiveContainer>
-        </Card>
-
-        <Card className="p-6">
-          <h3 className="font-semibold mb-1">Monthly Activity</h3>
-          <p className="text-sm text-muted-foreground mb-4">Scams flagged vs. jobs verified</p>
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={monthly}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="month" stroke="var(--muted-foreground)" fontSize={12} />
-              <YAxis stroke="var(--muted-foreground)" fontSize={12} />
-              <Tooltip contentStyle={{ background: "var(--popover)", border: "1px solid var(--border)", borderRadius: 8 }} />
-              <Legend />
-              <Bar dataKey="scams" fill="oklch(0.7 0.22 280)" radius={[6, 6, 0, 0]} />
-              <Bar dataKey="verified" fill="oklch(0.78 0.18 195)" radius={[6, 6, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </Card>
+      <div className="mb-8 grid gap-4 md:grid-cols-4">
+        {[
+          { label: "Analyze New Job", to: "/detect", icon: PlusCircle },
+          { label: "Report Scam", to: "/report", icon: FileWarning },
+          { label: "Check Company", to: "/company-verification", icon: Search },
+          { label: "View History", to: "/history", icon: History },
+        ].map((action) => (
+          <Button
+            key={action.label}
+            asChild
+            variant="outline"
+            className="h-20 justify-start glass text-left"
+          >
+            <Link to={action.to}>
+              <action.icon className="mr-3 h-5 w-5 text-primary" />
+              {action.label}
+            </Link>
+          </Button>
+        ))}
       </div>
 
-      {/* Blacklist */}
       <Card className="p-6">
-        <div className="flex flex-wrap items-center justify-between gap-4 mb-5">
-          <div className="flex items-center gap-2">
-            <Ban className="h-5 w-5 text-destructive" />
-            <h3 className="font-semibold text-lg">Fake Company Blacklist</h3>
-          </div>
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search blacklist..." className="pl-9 w-64" />
-          </div>
-        </div>
+        <h2 className="mb-4 text-lg font-semibold">Recent Analysis</h2>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-border text-left text-xs text-muted-foreground uppercase">
-                <th className="py-3 px-2">Company</th>
-                <th className="py-3 px-2">Type</th>
-                <th className="py-3 px-2 text-right">Reports</th>
-                <th className="py-3 px-2 text-right">Status</th>
+              <tr className="border-b text-left text-xs uppercase text-muted-foreground">
+                <th className="px-2 py-3">Date</th>
+                <th className="px-2 py-3">Company</th>
+                <th className="px-2 py-3">Risk Level</th>
+                <th className="px-2 py-3 text-right">Status</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((b) => (
-                <tr key={b.name} className="border-b border-border/50 hover:bg-muted/50 transition-colors">
-                  <td className="py-3 px-2 font-medium">{b.name}</td>
-                  <td className="py-3 px-2"><Badge variant="outline">{b.type}</Badge></td>
-                  <td className="py-3 px-2 text-right font-mono">{b.reports}</td>
-                  <td className="py-3 px-2 text-right"><Badge variant="destructive">Blacklisted</Badge></td>
+              {recent.map((row) => (
+                <tr key={`${row.date}-${row.company}`} className="border-b border-border/50">
+                  <td className="px-2 py-3">{row.date}</td>
+                  <td className="px-2 py-3 font-medium">{row.company}</td>
+                  <td className="px-2 py-3">
+                    <Risk risk={row.risk} />
+                  </td>
+                  <td className="px-2 py-3 text-right text-muted-foreground">{row.status}</td>
                 </tr>
               ))}
-              {filtered.length === 0 && (
-                <tr><td colSpan={4} className="py-8 text-center text-muted-foreground">No matches found.</td></tr>
-              )}
             </tbody>
           </table>
         </div>
       </Card>
     </div>
   );
+}
+
+function Risk({ risk }: { risk: string }) {
+  const cls =
+    risk === "High"
+      ? "bg-destructive/15 text-destructive"
+      : risk === "Medium"
+        ? "bg-warning/20 text-warning-foreground"
+        : "bg-success/15 text-success";
+  return <Badge className={`${cls} hover:${cls}`}>{risk}</Badge>;
 }

@@ -3,4 +3,10 @@
 minimumReleaseAge = 86400
 # Each entry bypasses the 24h guard for one package — confirm with the user
 # before adding any.
-minimumReleaseAgeExcludes = ["@lovable.dev/vite-tanstack-config"]
+# @lovable.dev/vite-tanstack-config REMOVED - supply chain risk
+minimumReleaseAgeExcludes = []
+
+[test]
+# Future: configure test runner here
+# root = "tests"
+# coverage = true

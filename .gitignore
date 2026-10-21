@@ -1,3 +1,9 @@
+# Env files - NEVER COMMIT
+.env
+.env.*
+!.env.example
+!.env.sample
+
 # Logs
 logs
 *.log
@@ -20,6 +26,12 @@ dist-ssr
 .wrangler/
 .dev.vars
 
+# TypeScript build cache
+*.tsbuildinfo
+
+# Test coverage
+coverage/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -30,3 +42,33 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# AI tool dirs
+.claude/
+.cursor/
+.windsurf/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# Databases
+*.sqlite
+*.sqlite3
+*.db
+backend/data/*.sqlite
+
+# Uploads
+backend_fastapi/uploads/*
+!backend_fastapi/uploads/.gitkeep
+
+# Large Binaries / Archives
+postgresql*.zip
+
