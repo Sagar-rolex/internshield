@@ -94,15 +94,23 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="ScamShield API", lifespan=lifespan)
 
+cors_origin_str = os.getenv("CORS_ORIGIN", "").strip()
+cors_origins = [o.strip() for o in cors_origin_str.split(",") if o.strip()]
+if not cors_origins:
+    cors_origins = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+        "http://localhost:3000",
+    ]
+
+cors_regex = r".*" if ("*" in cors_origin_str or not cors_origin_str) else os.getenv("CORS_ORIGIN_REGEX", None)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        o.strip()
-        for o in os.getenv(
-            "CORS_ORIGIN",
-            "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080,http://127.0.0.1:8080",
-        ).split(",")
-    ],
+    allow_origins=[] if cors_regex else cors_origins,
+    allow_origin_regex=cors_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -116,13 +124,18 @@ def _json(response: Response, status: int, body: dict) -> dict:
 
 # ── Health ───────────────────────────────────────────────────────────────────
 
+@app.get("/")
+@app.get("/health")
+async def root_health():
+    return {"status": "ok", "service": "ScamShield API", "version": "1.0.0"}
+
 @app.get("/api/health")
 async def health(db: AsyncSession = Depends(get_db)):
     try:
         await db.execute(select(func.count(User.id)))
     except Exception:
         raise HTTPException(503, "Database unavailable.")
-    return {"ok": True, "database": "postgresql"}
+    return {"ok": True, "database": "active"}
 
 
 # ── Static file serving for uploaded screenshots ──────────────────────────────
