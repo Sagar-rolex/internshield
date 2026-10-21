@@ -1,18 +1,16 @@
-import { defineConfig } from "vite";
-import { cloudflare } from "@cloudflare/vite-plugin";
-import { tanstackStart } from "@tanstack/react-start/plugin/vite";
-import react from "@vitejs/plugin-react";
-import tailwindcss from "@tailwindcss/vite";
-import tsconfigPaths from "vite-tsconfig-paths";
+import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
+// Detect Vercel environment automatically to build for Vercel Serverless Functions (.vercel/output).
 export default defineConfig({
-  plugins: [
-    cloudflare({ viteEnvironment: { name: "ssr" } }),
-    tanstackStart({
-      server: { entry: "server" },
-    }),
-    react(),
-    tailwindcss(),
-    tsconfigPaths(),
-  ],
+  nitro: {
+    preset: process.env.VERCEL ? "vercel" : (process.env.NITRO_PRESET ?? "vercel"),
+    output: {
+      dir: ".vercel/output",
+      serverDir: ".vercel/output/functions/__server.func",
+      publicDir: ".vercel/output/static",
+    },
+  },
+  tanstackStart: {
+    server: { entry: "server" },
+  },
 });
