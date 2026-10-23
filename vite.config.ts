@@ -1,18 +1,16 @@
-import { defineConfig } from "@lovable.dev/vite-tanstack-config";
+import { defineConfig } from "vite";
+import { tanstackStart } from "@tanstack/react-start/plugin/vite";
+import { nitro } from "nitro/vite";
+import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
+import tsconfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
-  vite: {
-    preview: {
-      allowedHosts: ["internshieldai-frontend.onrender.com"],
-    },
-    server: {
-      allowedHosts: true,
-    },
-  },
-  nitro: {
-    preset: "vercel",
-  },
-  tanstackStart: {
-    server: { entry: "server" },
-  },
+  plugins: [
+    tanstackStart(),
+    nitro(),
+    react(),
+    tailwindcss(),
+    tsconfigPaths(),
+  ],
 });
