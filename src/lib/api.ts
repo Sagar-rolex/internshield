@@ -4,9 +4,9 @@
 
 import type { AuthUser } from "@/components/AuthProvider";
 
-const API_URL =
-  (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_URL) ??
-  "https://internshield-api.onrender.com/api";
+const configuredApiUrl =
+  typeof import.meta !== "undefined" ? import.meta.env?.VITE_API_URL?.trim() : undefined;
+const API_URL = (configuredApiUrl || "https://internshield-backend.onrender.com/api").replace(/\/+$/, "");
 
 const AUTH_KEY = "scamshield.auth.token";
 
@@ -34,7 +34,21 @@ export function setToken(token: string | null) {
 
 // ── Core request helper ───────────────────────────────────────────────────
 
-type ApiError = { error: string };
+type ApiError = { error?: unknown; detail?: unknown };
+
+function errorMessage(data: ApiError, status: number): string {
+  if (typeof data.error === "string" && data.error.trim()) return data.error;
+  if (typeof data.detail === "string" && data.detail.trim()) return data.detail;
+  if (Array.isArray(data.detail)) {
+    const firstMessage = data.detail.find(
+      (item): item is { msg: string } =>
+        typeof item === "object" && item !== null && "msg" in item && typeof item.msg === "string",
+    )?.msg;
+    if (firstMessage) return firstMessage;
+  }
+  if (status >= 500) return "The service could not complete the request. Please try again.";
+  return `Request failed (${status}). Please check the request and try again.`;
+}
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
@@ -47,11 +61,19 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const response = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers,
-    credentials: "include",
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      ...options,
+      headers,
+      // Authentication uses the Authorization bearer token; cookies are not used by this API.
+      credentials: "omit",
+    });
+  } catch {
+    throw new Error(
+      "Could not reach the analysis service. Check your network and API configuration, then retry.",
+    );
+  }
 
   // Handle empty-body responses (e.g. 204)
   if (response.status === 204) return undefined as T;
@@ -62,11 +84,14 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   try {
     data = (await response.json()) as T & ApiError;
   } catch {
-    throw new Error("Unexpected server response. Is the backend running?");
+    if (!response.ok && response.status >= 500) {
+      throw new Error("The service could not complete the request. Please try again.");
+    }
+    throw new Error("The service returned an unreadable response. Please try again.");
   }
 
   if (!response.ok) {
-    const message = data?.error ?? `API error ${response.status}`;
+    const message = errorMessage(data, response.status);
     const err = new Error(message) as Error & { status: number };
     err.status = response.status;
     throw err;
@@ -189,10 +214,13 @@ export const api = {
   analyzeScreenshot: async (file: File) => {
     const formData = new FormData();
     formData.append("file", file);
-    const res = await request<{ analysis: AnalysisResult & { ocr_warning?: string } }>("/analyze-screenshot", {
-      method: "POST",
-      body: formData,
-    });
+    const res = await request<{ analysis: AnalysisResult & { ocr_warning?: string } }>(
+      "/analyze-screenshot",
+      {
+        method: "POST",
+        body: formData,
+      },
+    );
     return res.analysis;
   },
 

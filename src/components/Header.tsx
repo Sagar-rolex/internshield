@@ -49,18 +49,18 @@ export function Header() {
 
   return (
     <header className="sticky top-0 z-50 w-full glass">
-      <div className="container mx-auto flex h-16 items-center justify-between px-4">
-        <Link to="/" className="flex items-center gap-2 group">
+      <div className="container mx-auto flex h-16 items-center justify-between gap-2 px-4">
+        <Link to="/" className="flex min-w-0 items-center gap-2 group">
           <div className="relative">
             <Shield className="h-7 w-7 text-primary group-hover:animate-pulse-glow" />
             <div className="absolute inset-0 blur-lg bg-primary/40 -z-10" />
           </div>
-          <span className="font-bold text-lg tracking-tight">
+          <span className="whitespace-nowrap font-bold text-base tracking-tight sm:text-lg">
             ScamShield<span className="text-gradient-cyber">.AI</span>
           </span>
         </Link>
 
-        <nav className="hidden md:flex items-center gap-1">
+        <nav className="hidden xl:flex items-center gap-1">
           {nav.map((n) => (
             <Link
               key={n.to}
@@ -82,7 +82,7 @@ export function Header() {
           <Button
             variant="ghost"
             size="icon"
-            className="md:hidden"
+            className="xl:hidden"
             onClick={() => setOpen(!open)}
             aria-label={open ? "Close menu" : "Open menu"}
             aria-expanded={open}

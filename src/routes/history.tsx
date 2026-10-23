@@ -123,8 +123,8 @@ function HistoryContent() {
         )}
 
         {!loading && !error && analyses.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <div className="min-w-0 overflow-x-auto">
+            <table className="w-full min-w-[640px] text-sm">
               <thead>
                 <tr className="border-b text-left text-xs uppercase text-muted-foreground">
                   <th className="px-2 py-3">Date</th>
@@ -204,7 +204,7 @@ function AnalysisDetail({ analysis }: { analysis: AnalysisResult }) {
   return (
     <div className="space-y-4 pt-2">
       {/* Header scores */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="rounded-lg bg-muted p-3 text-center">
           <div className="text-xs text-muted-foreground">Scam Probability</div>
           <div className="text-2xl font-bold tabular-nums">{analysis.probability}%</div>

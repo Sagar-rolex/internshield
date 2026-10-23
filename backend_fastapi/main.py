@@ -35,7 +35,13 @@ from .services.gemini_service import (
     GeminiAnalysisError,
 )
 from .services.risk_aggregator import aggregate_evidence_and_ai
-from .services.ocr import get_ocr_backend
+from .services.ocr import (
+    NoReadableTextError,
+    OCRProcessingError,
+    OCRUnavailableError,
+    get_ocr_backend,
+    require_readable_text,
+)
 from .services.image_processor import ALLOWED_FORMATS, MAX_IMAGE_BYTES
 from .auth import (
     hash_password,
@@ -105,13 +111,16 @@ if not cors_origins:
         "http://localhost:3000",
     ]
 
-cors_regex = r".*" if ("*" in cors_origin_str or not cors_origin_str) else os.getenv("CORS_ORIGIN_REGEX", None)
+if "*" in cors_origins:
+    raise RuntimeError("CORS_ORIGIN must contain explicit frontend origins, not '*'.")
+
+cors_regex = os.getenv("CORS_ORIGIN_REGEX", "").strip() or None
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[] if cors_regex else cors_origins,
+    allow_origins=cors_origins,
     allow_origin_regex=cors_regex,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -766,7 +775,7 @@ async def analyze_screenshot_endpoint(
     if not image_bytes:
         raise HTTPException(400, "Please upload a screenshot.")
 
-    # Persist the image so we can reference it later
+    # Prepare a stable image reference; persist only after OCR succeeds.
     ext_map = {
         "image/jpeg": ".jpg",
         "image/png": ".png",
@@ -775,54 +784,30 @@ async def analyze_screenshot_endpoint(
     }
     ext = ext_map.get(content_type, ".jpg")
     image_name = f"{uuid.uuid4().hex}{ext}"
-    image_path = UPLOAD_DIR / image_name
-    image_path.write_bytes(image_bytes)
     image_ref = f"/uploads/{image_name}"
 
-    logger.info(f"Screenshot uploaded: {image_name}, size={len(image_bytes)} bytes, user={user.id}")
+    logger.info("Screenshot received: size=%s bytes", len(image_bytes))
 
     # Step 1: OCR with quality validation
     logger.info(f"Getting OCR backend (OCR_BACKEND={os.getenv('OCR_BACKEND', 'auto')})")
-    ocr_backend = get_ocr_backend()
+    try:
+        ocr_backend = get_ocr_backend()
+    except OCRUnavailableError as e:
+        logger.error("OCR backend unavailable: %s", e)
+        raise HTTPException(
+            503,
+            "Screenshot analysis is temporarily unavailable because OCR is not installed.",
+        ) from e
     ocr_mode = ocr_backend.name
     logger.info(f"Using OCR backend: {ocr_mode}")
 
     try:
-        logger.info(f"Starting OCR extraction for {image_name}")
+        logger.info("Starting screenshot OCR")
         ocr_result = ocr_backend.extract_text(image_bytes, file.filename or "")
-        logger.info(f"OCR extraction completed for {image_name}")
+        logger.info("Screenshot OCR completed")
     except Exception as e:
-        logger.error(f"OCR extraction failed with exception: {e}", exc_info=True)
-        # Return error response
-        return {
-            "analysis": {
-                "id": str(uuid.uuid4()),
-                "input_type": "screenshot",
-                "image_path": image_ref,
-                "extracted_text": "",
-                "probability": 0,
-                "risk": "Low",
-                "safe": True,
-                "trust_score": 100,
-                "reasons": [],
-                "positives": ["OCR processing failed. Please try again."],
-                "keywords": [],
-                "signals": [],
-                "ai": {
-                    "available": False,
-                    "explanation": "",
-                },
-                "recommendations": [
-                    "Try uploading the screenshot again",
-                    "Ensure the image is a valid JPG, PNG, or WEBP file",
-                    "Check that the image is not corrupted",
-                ],
-                "status": "error",
-                "error": f"OCR failed: {str(e)}",
-                "ocr_mode": ocr_mode,
-                "created_at": "",
-            }
-        }
+        logger.exception("Screenshot OCR raised an unexpected error")
+        raise HTTPException(500, "OCR could not process this image. Please try another screenshot.") from e
 
     logger.info(
         f"OCR result: backend={ocr_mode}, success={ocr_result.success}, "
@@ -830,53 +815,21 @@ async def analyze_screenshot_endpoint(
         f"quality_score={ocr_result.quality_score:.1f}"
     )
 
-    if ocr_result.error:
-        logger.warning(f"OCR error detail: {ocr_result.error}")
+    try:
+        extracted_text = require_readable_text(ocr_result)
+    except NoReadableTextError as e:
+        logger.warning("Screenshot OCR found no usable text: %s", ocr_result.error or "empty result")
+        raise HTTPException(422, str(e)) from e
+    except OCRProcessingError as e:
+        logger.error("Screenshot OCR processing failed: %s", e)
+        raise HTTPException(500, "OCR could not process this image. Please try another screenshot.") from e
 
-    # Step 2: Handle OCR failure with insufficient_text status
-    if not ocr_result.success:
-        ai_error = ocr_result.error or "OCR could not extract text from the image."
-
-        # Check if it's specifically an insufficient text error
-        is_insufficient = "Could not extract enough text" in ai_error or "quality too low" in ai_error
-
-        if is_insufficient:
-            # Return structured insufficient_text response
-            response = {
-                "analysis": {
-                    "id": str(uuid.uuid4()),
-                    "input_type": "screenshot",
-                    "image_path": image_ref,
-                    "extracted_text": ocr_result.text or "",
-                    "probability": 0,
-                    "risk": "Low",
-                    "safe": True,
-                    "trust_score": 100,
-                    "reasons": [],
-                    "positives": ["Please upload a clearer screenshot."],
-                    "keywords": [],
-                    "signals": [],
-                    "ai": {
-                        "available": False,
-                        "explanation": "",
-                    },
-                    "recommendations": [
-                        "Upload a clearer, higher-resolution screenshot",
-                        "Ensure text is legible and well-lit",
-                        "Try again with better image quality",
-                    ],
-                    "status": "insufficient_text",
-                    "ocr_mode": ocr_mode,
-                    "ocr_quality": ocr_result.quality_score,
-                    "ocr_confidence": ocr_result.confidence,
-                    "created_at": "",
-                }
-            }
-            logger.warning(f"OCR insufficient text: {ai_error}")
-            return response
-
-    # Step 3: OCR succeeded with sufficient text
-    extracted_text = ocr_result.text.strip()
+    image_path = UPLOAD_DIR / image_name
+    try:
+        image_path.write_bytes(image_bytes)
+    except OSError as e:
+        logger.exception("Could not store the analyzed screenshot")
+        raise HTTPException(500, "Analysis completed, but the screenshot could not be saved.") from e
 
     # Step 4: Run evidence-based analysis
     evidence_result = analyze_with_evidence(extracted_text)
@@ -952,9 +905,17 @@ async def analyze_screenshot_endpoint(
         recommendations=json.dumps(recs),
         ocr_mode=ocr_mode,
     )
-    db.add(row)
-    await db.commit()
-    await db.refresh(row)
+    try:
+        db.add(row)
+        await db.commit()
+        await db.refresh(row)
+    except Exception as e:
+        await db.rollback()
+        logger.exception("Could not save screenshot analysis to history")
+        raise HTTPException(
+            503,
+            "Analysis could not be saved to your history right now. Please try again.",
+        ) from e
 
     # Step 9: Format response
     response_data = _analysis_to_dict(row)

@@ -107,8 +107,8 @@ function Dashboard() {
 
       <Card className="p-6">
         <h2 className="mb-4 text-lg font-semibold">Recent Analysis</h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+        <div className="min-w-0 overflow-x-auto">
+          <table className="w-full min-w-[560px] text-sm">
             <thead>
               <tr className="border-b text-left text-xs uppercase text-muted-foreground">
                 <th className="px-2 py-3">Date</th>

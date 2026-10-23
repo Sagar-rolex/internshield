@@ -36,7 +36,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { analyzeJob, type JobInput, type ScamResult } from "@/lib/scam-detector";
+import { analyzeJob, type JobInput } from "@/lib/scam-detector";
 import { ProtectedRoute } from "@/components/AuthProvider";
 import { api, type AnalysisResult } from "@/lib/api";
 
@@ -63,7 +63,7 @@ function DetectRoute() {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/jpg"]);
+const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/jpg", "image/webp"]);
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB
 
 const MANUAL_STEPS = [
@@ -141,7 +141,7 @@ function Detect() {
 
   const validateImage = (file: File): string | null => {
     if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
-      return "Unsupported file format. Please upload JPG, JPEG, or PNG.";
+      return "Unsupported file format. Please upload JPG, JPEG, PNG, or WEBP.";
     }
     if (file.size > MAX_IMAGE_BYTES) {
       return "File is too large. Maximum size is 5 MB.";
@@ -665,7 +665,7 @@ function ScreenshotUpload({
           <input
             ref={inputRef}
             type="file"
-            accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+            accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
             className="hidden"
             onChange={(e) => onFileSelect(e.target.files?.[0] ?? null)}
           />
@@ -698,7 +698,7 @@ function ScreenshotUpload({
           <input
             ref={inputRef}
             type="file"
-            accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+            accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
             className="hidden"
             onChange={(e) => onFileSelect(e.target.files?.[0] ?? null)}
           />
@@ -832,7 +832,7 @@ function ResultView({
       {/* Score Breakdown — Hybrid Engine */}
       <Card className="p-4">
         <h3 className="font-semibold mb-3 text-sm">Hybrid Engine Scores</h3>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div className="rounded-lg bg-muted p-3 text-center">
             <div className="text-xs text-muted-foreground">Rule Engine</div>
             <div className="text-2xl font-bold tabular-nums text-primary">{ruleScore}</div>
@@ -871,7 +871,7 @@ function ResultView({
       </Card>
 
       {/* Risk + Trust */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Card className="p-4">
           <div className="text-xs text-muted-foreground">Risk Level</div>
           <div className="flex items-center gap-2 mt-1">

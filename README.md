@@ -73,12 +73,23 @@ Seeded automatically on the first backend start.
 
 | Variable | Where | Default |
 |---|---|---|
-| `VITE_API_URL` | frontend `.env` | `http://127.0.0.1:4000/api` |
+| `VITE_API_URL` | frontend build environment | Local: `http://127.0.0.1:4000/api`; production fallback: `https://internshield-backend.onrender.com/api` |
 | `DATABASE_URL` | backend | `postgresql+asyncpg://postgres:postgres@localhost:5432/scamshield` |
 | `SESSION_SECRET` | backend | `dev-secret-change-me` (**set a strong value in prod**) |
-| `CORS_ORIGIN` | backend | `http://localhost:5173` |
+| `CORS_ORIGIN` | backend | Local Vite origins; production must list the exact frontend origin(s), comma-separated |
 | `GEMINI_API_KEY` | backend | *required for AI layer* |
 | `OCR_BACKEND` | backend | `auto` (auto \| tesseract \| demo) |
+
+`auto` uses Tesseract when available and returns a clear service error if it is missing. It never substitutes sample OCR text. `demo` is an explicit development/test setting only.
+
+## Deploying the API to Render
+
+The Render Blueprint builds the FastAPI service from `backend_fastapi/Dockerfile`, which installs Tesseract and its English language data alongside the Python requirements. Set these values in the Render service environment:
+
+- `CORS_ORIGIN`: the exact Vercel production origin (for example, `https://your-project.vercel.app`). Add any approved preview/custom domains as comma-separated origins.
+- `DATABASE_URL`, `SESSION_SECRET`, and `GEMINI_API_KEY` as required by the backend. Keep secret values in Render's environment settings.
+
+Set the Vercel build environment variable `VITE_API_URL` to `https://internshield-backend.onrender.com/api`, or to the actual custom Render service URL if it differs. The API uses bearer tokens and does not require cross-origin cookies.
 
 ## API Endpoints
 

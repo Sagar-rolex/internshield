@@ -75,8 +75,8 @@ function ManageReports() {
             <Loader2 className="h-6 w-6 animate-spin text-primary" />
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <div className="min-w-0 overflow-x-auto">
+            <table className="w-full min-w-[680px] text-sm">
               <thead>
                 <tr className="border-b text-left text-xs uppercase text-muted-foreground">
                   <th className="px-2 py-3">Company</th>

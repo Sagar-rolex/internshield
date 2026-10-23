@@ -34,6 +34,40 @@ class OCRResult:
     quality_score: float = 0.0  # From image preprocessing
 
 
+class OCRUnavailableError(RuntimeError):
+    """Raised when real OCR is not installed or cannot be initialized."""
+
+
+class NoReadableTextError(ValueError):
+    """Raised when OCR cannot find enough readable text to analyze safely."""
+
+
+class OCRProcessingError(RuntimeError):
+    """Raised when OCR reports an internal processing error."""
+
+
+def require_readable_text(result: OCRResult) -> str:
+    """Return usable OCR text or fail instead of treating OCR failure as low risk."""
+    text = result.text.strip()
+    if result.success and text:
+        return text
+
+    error = result.error or "No readable text was found in the screenshot."
+    if error.startswith("OCR processing failed:"):
+        raise OCRProcessingError(error)
+    if error.startswith("Unable to read the uploaded file"):
+        raise NoReadableTextError(
+            "The image file is invalid or corrupted. Upload a valid JPG, PNG, or WEBP image."
+        )
+    if error.startswith("Unsupported file format:"):
+        raise NoReadableTextError("Unsupported image format. Upload a JPG, PNG, or WEBP image.")
+    if error.startswith(("Image is too small", "Image dimensions are too large", "File is too large")):
+        raise NoReadableTextError(error)
+    raise NoReadableTextError(
+        "No readable text found. Upload a clearer, higher-resolution screenshot and try again."
+    )
+
+
 MIN_EXTRACTED_CHARS = 50  # Minimum characters for valid OCR result
 CONFIDENCE_THRESHOLD = 20.0  # Minimum confidence percentage
 
@@ -183,10 +217,10 @@ def get_ocr_backend() -> OcrBackend:
     if mode == "tesseract":
         if _tesseract_usable():
             return TesseractBackend()
-        return DemoBackend()
+        raise OCRUnavailableError("Tesseract OCR is not installed or could not be started.")
 
     # auto — prefer real OCR when available
     if _tesseract_usable():
         return TesseractBackend()
 
-    return DemoBackend()
+    raise OCRUnavailableError("Tesseract OCR is not installed or could not be started.")
