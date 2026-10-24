@@ -33,7 +33,7 @@ function Contact() {
         <Card className="glass p-6 lg:col-span-2">
           <div className="space-y-5 text-sm">
             <Info icon={Mail} label="Email" value="support@internshield.com" />
-            <Info icon={Phone} label="Phone" value="+91 98765 00000" />
+            <Info icon={Phone} label="Phone" value="+91 8591189235" />
             <Info icon={MapPin} label="Office" value="Student Innovation Cell, India" />
           </div>
         </Card>
