@@ -10,12 +10,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 export const Route = createFileRoute("/login")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    redirect: search.redirect === "/detect" ? ("/detect" as const) : ("/dashboard" as const),
+  }),
   component: Login,
 });
 
 function Login() {
   const auth = useAuth();
   const navigate = useNavigate();
+  const { redirect } = Route.useSearch();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
@@ -39,7 +43,7 @@ function Login() {
     toast.success("Session timeout reminder enabled.", {
       description: "UI only: you will be notified before inactivity logout.",
     });
-    window.setTimeout(() => navigate({ to: "/dashboard" }), 0);
+    window.setTimeout(() => navigate({ to: redirect }), 0);
   };
 
   return (

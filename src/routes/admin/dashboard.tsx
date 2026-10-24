@@ -1,23 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Legend,
-  Line,
-  LineChart,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import { Building2, FileWarning, ShieldAlert, Users, Activity } from "lucide-react";
 import { AdminShell } from "@/components/AdminShell";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { BarTrendChart, DonutTrendChart, LineTrendChart } from "@/components/admin/LightweightCharts";
 
 export const Route = createFileRoute("/admin/dashboard")({
   component: AdminDashboard,
@@ -54,7 +40,7 @@ const recentReports = [
   { company: "WorkFromHome India Ltd", reporter: "Sara Khan", risk: "High", status: "Approved" },
 ];
 
-const COLORS = [
+const chartColors = [
   "var(--chart-1)",
   "var(--chart-2)",
   "var(--chart-3)",
@@ -88,52 +74,35 @@ function AdminDashboard() {
       <div className="mb-6 grid gap-6 xl:grid-cols-2">
         <Card className="p-6">
           <h2 className="mb-4 font-semibold">Monthly Analysis</h2>
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={monthly}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="month" />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Bar dataKey="analysis" fill="var(--chart-1)" radius={[6, 6, 0, 0]} />
-              <Bar dataKey="scams" fill="var(--chart-3)" radius={[6, 6, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          <BarTrendChart
+            data={monthly.map(({ month, analysis, scams }) => ({
+              label: month,
+              values: [analysis, scams],
+            }))}
+            colors={["var(--chart-1)", "var(--chart-3)"]}
+            label="Monthly job analyses and scam detections"
+          />
         </Card>
         <Card className="p-6">
           <h2 className="mb-4 font-semibold">Scam Categories</h2>
-          <ResponsiveContainer width="100%" height={280}>
-            <PieChart>
-              <Pie
-                data={categories}
-                dataKey="value"
-                nameKey="name"
-                innerRadius={60}
-                outerRadius={100}
-              >
-                {categories.map((_, i) => (
-                  <Cell key={i} fill={COLORS[i]} />
-                ))}
-              </Pie>
-              <Tooltip />
-              <Legend />
-            </PieChart>
-          </ResponsiveContainer>
+          <DonutTrendChart
+            data={categories.map(({ name, value }, index) => ({
+              label: name,
+              value,
+              color: chartColors[index],
+            }))}
+          />
         </Card>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-2">
         <Card className="p-6">
           <h2 className="mb-4 font-semibold">User Growth</h2>
-          <ResponsiveContainer width="100%" height={240}>
-            <LineChart data={monthly}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="month" />
-              <YAxis />
-              <Tooltip />
-              <Line type="monotone" dataKey="analysis" stroke="var(--chart-2)" strokeWidth={3} />
-            </LineChart>
-          </ResponsiveContainer>
+          <LineTrendChart
+            data={monthly.map(({ month, analysis }) => ({ label: month, value: analysis }))}
+            color="var(--chart-2)"
+            label="Monthly user growth"
+          />
         </Card>
         <Card className="p-6">
           <h2 className="mb-4 font-semibold">Recent Reports</h2>

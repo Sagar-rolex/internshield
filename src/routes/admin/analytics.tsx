@@ -1,19 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import { Activity, Building2, FileWarning, Percent, ShieldAlert } from "lucide-react";
 import { AdminShell } from "@/components/AdminShell";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { BarTrendChart, LineTrendChart } from "@/components/admin/LightweightCharts";
 
 export const Route = createFileRoute("/admin/analytics")({
   component: Analytics,
@@ -66,27 +56,19 @@ function Analytics() {
       <div className="mb-6 grid gap-6 xl:grid-cols-2">
         <Card className="p-6">
           <h2 className="mb-4 font-semibold">Jobs Analyzed</h2>
-          <ResponsiveContainer width="100%" height={280}>
-            <LineChart data={monthly}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="month" />
-              <YAxis />
-              <Tooltip />
-              <Line type="monotone" dataKey="jobs" stroke="var(--chart-1)" strokeWidth={3} />
-            </LineChart>
-          </ResponsiveContainer>
+          <LineTrendChart
+            data={monthly.map(({ month, jobs }) => ({ label: month, value: jobs }))}
+            color="var(--chart-1)"
+            label="Jobs analyzed each month"
+          />
         </Card>
         <Card className="p-6">
           <h2 className="mb-4 font-semibold">Monthly Reports</h2>
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={monthly}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="month" />
-              <YAxis />
-              <Tooltip />
-              <Bar dataKey="reports" fill="var(--chart-2)" radius={[6, 6, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          <BarTrendChart
+            data={monthly.map(({ month, reports }) => ({ label: month, values: [reports] }))}
+            colors={["var(--chart-2)"]}
+            label="Scam reports submitted each month"
+          />
         </Card>
       </div>
       <div className="grid gap-6 xl:grid-cols-3">

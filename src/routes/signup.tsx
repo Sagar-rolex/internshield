@@ -1,7 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
-import { toast } from "sonner";
 import { AuthFormShell, passwordScore } from "@/components/AuthFormShell";
 import { useAuth } from "@/components/AuthProvider";
 import { Button } from "@/components/ui/button";
@@ -115,7 +114,7 @@ function SignUp() {
       </form>
       <p className="mt-5 text-center text-sm text-muted-foreground">
         Already have an account?{" "}
-        <Link to="/login" className="text-primary hover:underline">
+        <Link to="/login" search={{ redirect: "/dashboard" }} className="text-primary hover:underline">
           Login
         </Link>
       </p>

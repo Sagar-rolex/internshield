@@ -9,6 +9,7 @@ from __future__ import annotations
 import io
 import os
 import re
+import shutil
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
@@ -21,6 +22,18 @@ try:
     TESSERACT_AVAILABLE = True
 except ImportError:
     TESSERACT_AVAILABLE = False
+
+
+if TESSERACT_AVAILABLE and not shutil.which("tesseract"):
+    # Windows installs Tesseract here by default, but the installer may not
+    # update PATH for an already-open terminal or service process.
+    tesseract_path = os.path.join(
+        os.environ.get("ProgramFiles", r"C:\Program Files"),
+        "Tesseract-OCR",
+        "tesseract.exe",
+    )
+    if os.path.isfile(tesseract_path):
+        pytesseract.pytesseract.tesseract_cmd = tesseract_path
 
 
 @dataclass(frozen=True)

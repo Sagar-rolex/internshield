@@ -200,6 +200,7 @@ export function ProtectedRoute({
 }) {
   const auth = useAuth();
   const location = useLocation();
+  const redirect = location.pathname === "/detect" ? "/detect" : "/dashboard";
 
   if (auth.loading) {
     return (
@@ -210,7 +211,7 @@ export function ProtectedRoute({
   }
 
   if (!auth.user)
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/login" search={{ redirect }} replace />;
 
   if (auth.role !== role) {
     // Admin superset: allow admin into "user" guarded routes

@@ -58,7 +58,7 @@ function ForgotPassword() {
       </form>
       <p className="mt-5 text-center text-sm text-muted-foreground">
         Remembered it?{" "}
-        <Link to="/login" className="text-primary hover:underline">
+        <Link to="/login" search={{ redirect: "/dashboard" }} className="text-primary hover:underline">
           Back to login
         </Link>
       </p>

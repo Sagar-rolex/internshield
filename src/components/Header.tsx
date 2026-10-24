@@ -92,7 +92,7 @@ export function Header() {
         </div>
       </div>
       {open && (
-        <div className="md:hidden border-t border-border bg-background/95 backdrop-blur">
+        <div className="xl:hidden border-t border-border bg-background/95 backdrop-blur">
           <nav className="flex flex-col p-4 gap-1">
             {nav.map((n) => (
               <Link

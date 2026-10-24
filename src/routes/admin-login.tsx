@@ -54,13 +54,14 @@ function AdminLogin() {
               type={show ? "text" : "password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="admin123"
+              placeholder="Enter admin password"
               className="pr-10"
             />
             <button
               type="button"
               onClick={() => setShow((v) => !v)}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+              aria-label={show ? "Hide password" : "Show password"}
             >
               {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </button>

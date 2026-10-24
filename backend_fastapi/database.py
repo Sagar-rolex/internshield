@@ -10,6 +10,13 @@ DATABASE_URL = os.getenv(
     "sqlite+aiosqlite:///./scamshield.db",
 )
 
+# Render (and several other managed PostgreSQL providers) supply a
+# postgresql:// URL. SQLAlchemy's async engine needs the asyncpg dialect.
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
+elif DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 
 engine = create_async_engine(DATABASE_URL, echo=False, future=True, connect_args=connect_args)

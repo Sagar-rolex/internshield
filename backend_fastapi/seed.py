@@ -3,6 +3,7 @@ Seed the database with demo users, reports, and companies.
 Run once: python -m backend_fastapi.seed
 """
 import asyncio
+import os
 import uuid
 from datetime import datetime
 from sqlalchemy import select, func
@@ -45,6 +46,34 @@ async def seed():
         count = (await db.execute(select(func.count(User.id)))).scalar()
         if count and count > 0:
             print("Database already seeded — skipping.")
+            return
+
+        demo_data_enabled = os.getenv("SEED_DEMO_DATA", "true").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+        if not demo_data_enabled:
+            # Public deployments must never receive the documented demo
+            # passwords. An administrator can be provisioned once using
+            # deployment secrets instead.
+            admin_email = os.getenv("ADMIN_EMAIL", "").strip().lower()
+            admin_password = os.getenv("ADMIN_PASSWORD", "")
+            if admin_email and admin_password:
+                db.add(
+                    User(
+                        id=_uuid(),
+                        name="InternShield Admin",
+                        email=admin_email,
+                        password_hash=hash_password(admin_password),
+                        role="admin",
+                        status="Active",
+                    )
+                )
+                await db.commit()
+                print("Seeded production administrator from environment.")
+            else:
+                print("Demo seeding disabled; no administrator credentials configured.")
             return
 
         for u in USERS:

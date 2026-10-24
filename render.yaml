@@ -8,3 +8,15 @@ services:
     envVars:
       - key: CORS_ORIGIN
         sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: SEED_DEMO_DATA
+        value: "false"
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
