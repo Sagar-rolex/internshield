@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { Loader2, Send } from "lucide-react";
+import { Send } from "lucide-react";
 import { toast } from "sonner";
 import { AuthFormShell } from "@/components/AuthFormShell";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,6 @@ export const Route = createFileRoute("/forgot-password")({
 
 function ForgotPassword() {
   const [email, setEmail] = useState("");
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const submit = (e: React.FormEvent) => {
@@ -23,11 +22,7 @@ function ForgotPassword() {
       return;
     }
     setError("");
-    setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      toast.success("Password reset link has been sent to your email.");
-    }, 850);
+    toast.info("Password reset is not connected yet. Contact support for account recovery.");
   };
 
   return (
@@ -43,22 +38,18 @@ function ForgotPassword() {
           />
           {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
-        <Button
-          type="submit"
-          className="h-11 w-full bg-gradient-cyber shadow-glow"
-          disabled={loading}
-        >
-          {loading ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <Send className="mr-2 h-4 w-4" />
-          )}{" "}
+        <Button type="submit" className="h-11 w-full bg-gradient-cyber shadow-glow">
+          <Send className="mr-2 h-4 w-4" />
           Send Reset Link
         </Button>
       </form>
       <p className="mt-5 text-center text-sm text-muted-foreground">
         Remembered it?{" "}
-        <Link to="/login" search={{ redirect: "/dashboard" }} className="text-primary hover:underline">
+        <Link
+          to="/login"
+          search={{ redirect: "/dashboard" }}
+          className="text-primary hover:underline"
+        >
           Back to login
         </Link>
       </p>

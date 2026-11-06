@@ -22,7 +22,7 @@ export SESSION_SECRET=dev-secret-change-me
 export CORS_ORIGIN=http://localhost:5173
 
 # 5. Start the server
-uvicorn backend_fastapi.main:app --host 127.0.0.1 --port 4000 --reload
+uvicorn backend_fastapi.main:app --host 127.0.0.1 --port 4001 --reload
 # or via npm script:
 npm run backend
 ```
@@ -31,7 +31,7 @@ Tables are created automatically on first start. Seed data is inserted if the us
 
 ## API Docs
 
-Open http://127.0.0.1:4000/docs for the interactive Swagger UI.
+Open http://127.0.0.1:4001/docs for the interactive Swagger UI.
 
 ## Environment Variables
 
@@ -40,7 +40,8 @@ Open http://127.0.0.1:4000/docs for the interactive Swagger UI.
 | `DATABASE_URL` | `postgresql+asyncpg://postgres:postgres@localhost:5432/scamshield` | PostgreSQL connection string |
 | `SESSION_SECRET` | `dev-secret-change-me` | HMAC signing key — set a strong value in production |
 | `CORS_ORIGIN` | `http://localhost:5173` | Comma-separated allowed origins |
-| `GEMINI_API_KEY` | *required for AI layer* | Google Gemini API key for AI analysis |
+| `GEMINI_API_KEY` | *required for AI/chat layer* | Google Gemini API key; set only on the backend |
+| `GEMINI_MODEL` | `gemini-3.8-flash` | Optional Gemini model name override |
 | `OCR_BACKEND` | `auto` | `auto` \| `tesseract` \| `demo` — OCR engine selection |
 
 ## Demo Accounts
@@ -71,4 +72,4 @@ The backend implements a **Hybrid Scam Detection Engine** with three services:
 2. **`services/gemini_service.py`** — Google Gemini AI contextual analysis (never exposed to frontend)
 3. **`services/risk_aggregator.py`** — Combines rule + AI scores (70%/30% weight)
 
-The `GEMINI_API_KEY` environment variable is **required only for the AI layer**. If not set or if Gemini fails, the engine gracefully degrades to rule-only analysis.
+The `GEMINI_API_KEY` environment variable is **required for the chatbot and optional AI analysis layer**. If it is not configured, rule-based job analysis still works; chatbot requests return a clear unavailable response rather than a fabricated answer. The service uses Google's `google-genai` SDK and the `GEMINI_MODEL` setting.

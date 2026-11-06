@@ -9,6 +9,7 @@ import os
 import re
 import time
 import secrets
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -18,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .database import get_db
-from .models import User
+from .models import RevokedToken, User
 
 SCHEME = "scrypt"
 SCRYPT_KEYLEN = 64
@@ -26,7 +27,13 @@ SCRYPT_N = 16384
 SCRYPT_R = 8
 SCRYPT_P = 1
 SESSION_SECRET = os.getenv("SESSION_SECRET", "dev-secret-change-me")
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
 TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60  # 7 days
+
+if APP_ENV == "production" and (
+    SESSION_SECRET == "dev-secret-change-me" or len(SESSION_SECRET) < 32
+):
+    raise RuntimeError("SESSION_SECRET must be a unique random value of at least 32 characters in production.")
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -125,7 +132,12 @@ def verify_token(token: str) -> dict[str, Any] | None:
 
 def issue_token(user: User) -> str:
     return sign_token(
-        {"sub": user.id, "role": user.role, "exp": time.time() * 1000 + TOKEN_TTL_SECONDS * 1000}
+        {
+            "sub": user.id,
+            "role": user.role,
+            "jti": str(uuid.uuid4()),
+            "exp": int(time.time() * 1000 + TOKEN_TTL_SECONDS * 1000),
+        }
     )
 
 
@@ -161,12 +173,33 @@ async def _get_current_user(
     if cred is None:
         raise HTTPException(401, "Authentication required.")
     payload = verify_token(cred.credentials)
-    if not payload:
+    if not payload or not isinstance(payload.get("sub"), str) or not isinstance(payload.get("jti"), str):
         raise HTTPException(401, "Invalid or expired token.")
+    revoked = await db.get(RevokedToken, payload["jti"])
+    if revoked is not None:
+        raise HTTPException(401, "Session has been signed out.")
     result = await db.execute(select(User).where(User.id == payload["sub"]))
     user = result.scalar_one_or_none()
-    if user is None:
-        raise HTTPException(401, "User not found.")
+    if user is None or user.status != "Active":
+        raise HTTPException(401, "Account is unavailable.")
+    return user
+
+
+async def get_optional_user(
+    cred: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: AsyncSession = Depends(get_db),
+) -> User | None:
+    """Resolve an optional signed-in user for public company lookups."""
+    if cred is None:
+        return None
+    payload = verify_token(cred.credentials)
+    if not payload or not isinstance(payload.get("sub"), str) or not isinstance(payload.get("jti"), str):
+        raise HTTPException(401, "Invalid or expired token.")
+    if await db.get(RevokedToken, payload["jti"]):
+        raise HTTPException(401, "Session has been signed out.")
+    user = (await db.execute(select(User).where(User.id == payload["sub"]))).scalar_one_or_none()
+    if user is None or user.status != "Active":
+        raise HTTPException(401, "Account is unavailable.")
     return user
 
 

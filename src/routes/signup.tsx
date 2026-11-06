@@ -24,6 +24,7 @@ function SignUp() {
     confirm: "",
   });
   const [show, setShow] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const score = passwordScore(form.password);
@@ -37,8 +38,16 @@ function SignUp() {
     Object.entries(form).forEach(([key, value]) => {
       if (!value.trim()) next[key] = "Required";
     });
+    if (form.name.trim() && form.name.trim().length < 2) {
+      next.name = "Name must be at least 2 characters";
+    }
     if (form.email && !emailRegex.test(form.email)) next.email = "Enter a valid email address";
-    if (form.password && score < 50) next.password = "Use a stronger password";
+    if (
+      form.password &&
+      (form.password.length < 8 || !/[A-Z]/.test(form.password) || !/[0-9]/.test(form.password))
+    ) {
+      next.password = "Use at least 8 characters, one uppercase letter, and one number";
+    }
     if (form.password !== form.confirm) next.confirm = "Passwords do not match";
     setErrors(next);
     if (Object.keys(next).length) return;
@@ -97,13 +106,28 @@ function SignUp() {
           </p>
           {errors.password && <p className="text-xs text-destructive">{errors.password}</p>}
         </div>
-        <Field
-          label="Confirm Password"
-          type="password"
-          value={form.confirm}
-          onChange={(v) => update("confirm", v)}
-          error={errors.confirm}
-        />
+        <div className="space-y-2">
+          <Label htmlFor="signup-confirm-password">Confirm Password</Label>
+          <div className="relative">
+            <Input
+              id="signup-confirm-password"
+              type={showConfirm ? "text" : "password"}
+              value={form.confirm}
+              onChange={(e) => update("confirm", e.target.value)}
+              className="pr-10"
+            />
+            <button
+              type="button"
+              onClick={() => setShowConfirm((visible) => !visible)}
+              className="absolute right-1 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={showConfirm ? "Hide confirm password" : "Show confirm password"}
+              aria-pressed={showConfirm}
+            >
+              {showConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
+          {errors.confirm && <p className="text-xs text-destructive">{errors.confirm}</p>}
+        </div>
         <Button
           type="submit"
           className="h-11 w-full bg-gradient-cyber shadow-glow"
@@ -114,7 +138,11 @@ function SignUp() {
       </form>
       <p className="mt-5 text-center text-sm text-muted-foreground">
         Already have an account?{" "}
-        <Link to="/login" search={{ redirect: "/dashboard" }} className="text-primary hover:underline">
+        <Link
+          to="/login"
+          search={{ redirect: "/dashboard" }}
+          className="text-primary hover:underline"
+        >
           Login
         </Link>
       </p>

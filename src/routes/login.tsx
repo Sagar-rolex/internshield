@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { Eye, EyeOff, Loader2, Mail } from "lucide-react";
+import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { AuthFormShell } from "@/components/AuthFormShell";
 import { useAuth } from "@/components/AuthProvider";
@@ -36,10 +36,7 @@ function Login() {
     setLoading(true);
     const ok = await auth.login(email, password);
     setLoading(false);
-    if (!ok) {
-      toast.error("Invalid credentials. Please check your email and password.");
-      return;
-    }
+    if (!ok) return;
     toast.success("Session timeout reminder enabled.", {
       description: "UI only: you will be notified before inactivity logout.",
     });
@@ -97,19 +94,6 @@ function Login() {
           {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Login
         </Button>
       </form>
-      <div className="my-5 flex items-center gap-3 text-xs text-muted-foreground">
-        <span className="h-px flex-1 bg-border" /> or continue with{" "}
-        <span className="h-px flex-1 bg-border" />
-      </div>
-      <div className="flex justify-center">
-        <Button
-          variant="outline"
-          className="w-full max-w-xs"
-          onClick={() => toast.info("Google login is UI only in this prototype.")}
-        >
-          <Mail className="mr-2 h-4 w-4" /> Google
-        </Button>
-      </div>
       <p className="mt-5 text-center text-sm text-muted-foreground">
         New here?{" "}
         <Link to="/signup" className="text-primary hover:underline">

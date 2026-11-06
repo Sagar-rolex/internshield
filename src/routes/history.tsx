@@ -61,23 +61,26 @@ function HistoryContent() {
   }, []);
 
   return (
-    <div className="container mx-auto px-4 py-12">
+    <div className="container mx-auto min-w-0 px-4 py-8 sm:py-12">
       <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
         <div>
           <Badge variant="outline" className="mb-3 border-primary/40 text-primary">
             <HistoryIcon className="mr-1.5 h-3 w-3" /> Saved History
           </Badge>
-          <h1 className="text-4xl font-bold">Analysis History</h1>
+          <h1 className="text-3xl font-bold sm:text-4xl">Analysis History</h1>
           <p className="mt-2 text-sm text-muted-foreground">
             Every analysis you run from the Detect page is saved here for review.
           </p>
         </div>
-        <Button variant="outline" onClick={() => toast.info("History export will be available soon.")}>
+        <Button
+          variant="outline"
+          onClick={() => toast.info("History export will be available soon.")}
+        >
           <Download className="mr-2 h-4 w-4" /> Export
         </Button>
       </div>
 
-      <Card className="p-6">
+      <Card className="min-w-0 overflow-hidden p-3 sm:p-6">
         {loading && (
           <div className="flex items-center justify-center py-16 gap-3 text-muted-foreground">
             <Loader2 className="h-5 w-5 animate-spin" /> Loading history...
@@ -123,7 +126,7 @@ function HistoryContent() {
         )}
 
         {!loading && !error && analyses.length > 0 && (
-          <div className="min-w-0 overflow-x-auto">
+          <div className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain">
             <table className="w-full min-w-[640px] text-sm">
               <thead>
                 <tr className="border-b text-left text-xs uppercase text-muted-foreground">
@@ -160,7 +163,13 @@ function HistoryContent() {
                     </td>
                     <td className="px-2 py-3">
                       <Badge
-                        variant={row.risk === "High" ? "destructive" : row.risk === "Medium" ? "secondary" : "outline"}
+                        variant={
+                          row.risk === "High" || row.risk === "Critical"
+                            ? "destructive"
+                            : row.risk === "Medium"
+                              ? "secondary"
+                              : "outline"
+                        }
                         className={
                           row.risk === "Low"
                             ? "bg-success/15 text-success border-success/20"
@@ -216,7 +225,7 @@ function AnalysisDetail({ analysis }: { analysis: AnalysisResult }) {
         <div className="rounded-lg bg-muted p-3 text-center">
           <div className="text-xs text-muted-foreground">Risk Level</div>
           <Badge
-            variant={analysis.risk === "High" ? "destructive" : "secondary"}
+            variant={analysis.risk === "High" || analysis.risk === "Critical" ? "destructive" : "secondary"}
             className={
               analysis.risk === "Low"
                 ? "bg-success/15 text-success"
@@ -259,7 +268,9 @@ function AnalysisDetail({ analysis }: { analysis: AnalysisResult }) {
           <div className="space-y-1.5">
             {analysis.signals.map((s) => (
               <div key={s.name} className="flex items-center justify-between text-xs">
-                <span className={s.triggered ? "text-destructive font-medium" : "text-muted-foreground"}>
+                <span
+                  className={s.triggered ? "text-destructive font-medium" : "text-muted-foreground"}
+                >
                   {s.triggered ? "●" : "○"} {s.name}
                 </span>
                 <span className="font-mono">{s.triggered ? `+${s.weight}` : "0"}</span>

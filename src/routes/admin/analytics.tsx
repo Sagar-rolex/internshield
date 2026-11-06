@@ -45,16 +45,16 @@ function Analytics() {
         <Badge variant="outline" className="mb-3 border-primary/40 text-primary">
           Analytics Page
         </Badge>
-        <h1 className="text-4xl font-bold">Platform Analytics</h1>
+        <h1 className="break-words text-3xl font-bold sm:text-4xl">Platform Analytics</h1>
       </div>
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mb-6 grid min-w-0 grid-cols-1 gap-4 min-[480px]:grid-cols-2 2xl:grid-cols-4">
         <Metric icon={Activity} label="Jobs Analyzed" value="42,318" />
         <Metric icon={Percent} label="Scam Detection Rate" value="21.4%" />
         <Metric icon={FileWarning} label="Monthly Reports" value="470" />
         <Metric icon={Building2} label="Most Reported Companies" value="4" />
       </div>
-      <div className="mb-6 grid gap-6 xl:grid-cols-2">
-        <Card className="p-6">
+      <div className="mb-6 grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-6">
+        <Card className="min-w-0 overflow-hidden p-4 sm:p-6">
           <h2 className="mb-4 font-semibold">Jobs Analyzed</h2>
           <LineTrendChart
             data={monthly.map(({ month, jobs }) => ({ label: month, value: jobs }))}
@@ -62,7 +62,7 @@ function Analytics() {
             label="Jobs analyzed each month"
           />
         </Card>
-        <Card className="p-6">
+        <Card className="min-w-0 overflow-hidden p-4 sm:p-6">
           <h2 className="mb-4 font-semibold">Monthly Reports</h2>
           <BarTrendChart
             data={monthly.map(({ month, reports }) => ({ label: month, values: [reports] }))}
@@ -71,8 +71,8 @@ function Analytics() {
           />
         </Card>
       </div>
-      <div className="grid gap-6 xl:grid-cols-3">
-        <Card className="p-6">
+      <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2 2xl:grid-cols-3 lg:gap-6">
+        <Card className="min-w-0 overflow-hidden p-4 sm:p-6">
           <h2 className="mb-4 font-semibold">Top Scam Categories</h2>
           <div className="space-y-3">
             {categories.map((cat) => (
@@ -80,7 +80,7 @@ function Analytics() {
             ))}
           </div>
         </Card>
-        <Card className="p-6">
+        <Card className="min-w-0 overflow-hidden p-4 sm:p-6">
           <h2 className="mb-4 font-semibold">Most Reported Companies</h2>
           <div className="space-y-3">
             {companies.map((company, index) => (
@@ -88,7 +88,7 @@ function Analytics() {
             ))}
           </div>
         </Card>
-        <Card className="p-6">
+        <Card className="min-w-0 overflow-hidden p-4 sm:p-6">
           <h2 className="mb-4 font-semibold">Recent Activity</h2>
           <div className="space-y-3">
             {activity.map((item) => (
@@ -111,19 +111,21 @@ function Metric({
   value: string;
 }) {
   return (
-    <Card className="glass p-5">
+    <Card className="glass min-w-0 p-4 sm:p-5">
       <Icon className="mb-4 h-6 w-6 text-primary" />
       <div className="text-2xl font-bold">{value}</div>
-      <div className="text-sm text-muted-foreground">{label}</div>
+      <div className="break-words text-sm text-muted-foreground">{label}</div>
     </Card>
   );
 }
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between rounded-lg bg-muted/40 p-3 text-sm">
-      <span>{label}</span>
-      <Badge variant="outline">{value}</Badge>
+    <div className="flex min-w-0 items-center justify-between gap-2 rounded-lg bg-muted/40 p-3 text-sm">
+      <span className="min-w-0 break-words">{label}</span>
+      <Badge className="shrink-0" variant="outline">
+        {value}
+      </Badge>
     </div>
   );
 }

@@ -1,0 +1,32 @@
+{
+  "description": "Synthetic regression cases for InternShield AI. These examples are not representative of real-world prevalence and must not be used as a real-world accuracy claim.",
+  "cases": [
+    {"id":"upfront_registration_fee","split":"validation","label":"suspicious","text":"Junior Data Entry Intern. Pay a registration fee of ₹500 to apply. Send your resume today."},
+    {"id":"refundable_security_deposit","split":"validation","label":"suspicious","text":"Work from home assistant. A refundable security deposit of Rs 10,000 is required before joining."},
+    {"id":"offer_letter_payment","split":"validation","label":"suspicious","text":"Pay ₹1,500 to receive your offer letter and secure employment. No interview is required."},
+    {"id":"training_fee","split":"validation","label":"suspicious","text":"Selected candidates must pay the training fee before onboarding. Contact recruiting for payment details."},
+    {"id":"equipment_purchase","split":"validation","label":"suspicious","text":"Buy the required laptop from our approved recruiter and pay the equipment charge before you start. Remote data entry role."},
+    {"id":"unrealistic_remote_salary","split":"validation","label":"suspicious","text":"Simple copy paste work from home, 1 hour daily, earn ₹50,000 per day guaranteed. No experience needed."},
+    {"id":"guaranteed_selection","split":"validation","label":"suspicious","text":"Guaranteed selection and offer letter for every applicant. No interview or skills assessment required."},
+    {"id":"urgent_payment","split":"validation","label":"suspicious","text":"Only 2 seats left. Pay the application fee immediately within 2 hours to secure your position."},
+    {"id":"otp_theft","split":"validation","label":"suspicious","text":"To complete recruitment, send your OTP and UPI PIN to the hiring manager on WhatsApp."},
+    {"id":"bank_credentials","split":"validation","label":"suspicious","text":"Provide your internet banking password and card CVV for payroll verification before joining."},
+    {"id":"fake_recruiter","split":"validation","label":"suspicious","text":"Remote data entry, ₹8,000 per hour guaranteed. Message only this recruiter on Telegram and pay the refundable onboarding deposit."},
+    {"id":"multi_signal","split":"validation","label":"suspicious","text":"Guaranteed job placement, no interview. Pay a refundable registration fee today to receive an offer. Share your OTP and upload your PAN number with our WhatsApp recruiter."},
+    {"id":"software_developer_legitimate","split":"validation","label":"legitimate","text":"Acme Technologies is hiring a Software Developer. Responsibilities include building APIs, code review, and automated tests. Requirements: 3 years Python, SQL, and cloud experience. Apply at careers.acme.example."},
+    {"id":"realistic_internship","split":"validation","label":"legitimate","text":"Summer Software Engineering Intern at Northstar Labs. 12-week paid internship, stipend ₹35,000 per month, mentor-led project, interview and coding exercise. Apply through northstar.example/careers."},
+    {"id":"transparent_unpaid_internship","split":"validation","label":"legitimate","text":"A voluntary, unpaid 4-week internship with a nonprofit. No fee is charged. Clear learning objectives, named supervisor, flexible hours, and no promise of employment. Apply through the organization website."},
+    {"id":"qualified_senior_salary","split":"validation","label":"legitimate","text":"Senior Principal Software Engineer, annual compensation ₹1.2 crore, requiring 12 years experience, distributed systems leadership, architecture ownership, and a multi-stage interview. Apply on the official company careers page."},
+    {"id":"no_application_fee","split":"validation","label":"legitimate","text":"Graduate Analyst vacancy. No registration or application fee is charged. Candidates are assessed through interviews and a work sample. Full responsibilities and eligibility criteria are on our careers website."},
+    {"id":"normal_deadline","split":"validation","label":"legitimate","text":"Applications close on 30 June. Product Design Intern, 6-month term, stipend ₹25,000 per month. Portfolio review and two interviews. Apply through the official careers portal."},
+    {"id":"scam_awareness_warning","split":"validation","label":"legitimate","text":"Safety notice: Never share your OTP or pay a registration fee to get a job. Our hiring team never asks applicants for money."},
+    {"id":"fees_in_context","split":"validation","label":"legitimate","text":"Our HR training course explains common application fees charged by scammers. Candidates applying for this role do not pay any fees."},
+    {"id":"negated_registration_fee","split":"validation","label":"legitimate","text":"No registration fee required. There is no security deposit, and applicants should never send money to a recruiter."},
+    {"id":"unverified_sparse_listing","split":"validation","label":"legitimate","text":"Customer support assistant wanted. Duties include answering customer questions and documenting cases. Apply by email."},
+    {"id":"salary_35k_format","split":"validation","label":"legitimate","text":"Backend Developer, 3 years experience, compensation 35K per month. Responsibilities include maintaining production services and tests; standard technical interviews."},
+    {"id":"salary_lpa_format","split":"validation","label":"legitimate","text":"Graduate engineering role, 0.5 LPA stipend for a short academic project, defined supervisor and learning outcomes, no fees, selection through interview."},
+    {"id":"messaging_with_official_process","split":"validation","label":"legitimate","text":"For questions, message our verified company WhatsApp account. Applications are submitted on the official website and selected candidates complete two interviews. No fees."},
+    {"id":"mentions_payment_without_request","split":"validation","label":"legitimate","text":"The company processes monthly salary payments by bank transfer. Applicants are not asked to pay any fee."},
+    {"id":"ocr_spacing_payment","split":"validation","label":"suspicious","text":"J O B   O F F E R  Pay Rs. 5000 refundable security deposit before interview to confirm your position."}
+  ]
+}

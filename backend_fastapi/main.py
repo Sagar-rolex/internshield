@@ -3,6 +3,7 @@ FastAPI app — drop-in replacement for the Node.js backend.
 Exact same API contract: same endpoints, same JSON shapes.
 """
 import os
+import asyncio
 import time
 import uuid
 import json
@@ -13,11 +14,19 @@ from typing import Optional
 from fastapi import FastAPI, Depends, HTTPException, Request, Response, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy import select, update, delete, func
+from sqlalchemy import case, select, update, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .database import engine, get_db, Base
-from .models import User, ScamReport, Company, Analysis
+from .models import (
+    Analysis,
+    Company,
+    CompanyVerification,
+    RevokedToken,
+    ScamReport,
+    ScamReportOwner,
+    User,
+)
 from .schemas import (
     RegisterInput,
     LoginInput,
@@ -25,8 +34,10 @@ from .schemas import (
     CreateReportInput,
     UpdateReportInput,
     CreateCompanyInput,
+    CompanyVerificationInput,
     UpdateCompanyInput,
     AnalyzeManualInput,
+    ChatInput,
 )
 from .services.evidence_engine import analyze_with_evidence
 from .services.gemini_service import (
@@ -35,6 +46,7 @@ from .services.gemini_service import (
     GeminiAnalysisError,
 )
 from .services.risk_aggregator import aggregate_evidence_and_ai
+from .services.chat_service import generate_chat_reply, wants_personal_analysis
 from .services.ocr import (
     NoReadableTextError,
     OCRProcessingError,
@@ -52,6 +64,8 @@ from .auth import (
     auth_response,
     require_auth,
     require_admin,
+    get_optional_user,
+    verify_token,
 )
 from .seed import seed
 
@@ -70,11 +84,27 @@ _rate_log: dict[str, list[float]] = {}
 RATE_WINDOW = 60.0
 RATE_MAX = 120
 RATE_AUTH_MAX = 10
+RATE_REGISTER_MAX = 5
+RATE_CHAT_MAX = 20
+_rate_calls = 0
 
 
 def _check_rate(key: str, limit: int) -> bool:
+    global _rate_calls
     now = time.time()
     entries = [t for t in _rate_log.get(key, []) if now - t < RATE_WINDOW]
+    _rate_calls += 1
+    if _rate_calls % 128 == 0:
+        for old_key, old_entries in list(_rate_log.items()):
+            if not old_entries or now - old_entries[-1] >= RATE_WINDOW:
+                _rate_log.pop(old_key, None)
+    if len(_rate_log) > 10_000:
+        oldest_keys = sorted(
+            _rate_log,
+            key=lambda existing: _rate_log[existing][-1] if _rate_log[existing] else 0,
+        )[:2_000]
+        for old_key in oldest_keys:
+            _rate_log.pop(old_key, None)
     if len(entries) >= limit:
         return False
     entries.append(now)
@@ -102,19 +132,28 @@ app = FastAPI(title="ScamShield API", lifespan=lifespan)
 
 cors_origin_str = os.getenv("CORS_ORIGIN", "").strip()
 cors_origins = [o.strip() for o in cors_origin_str.split(",") if o.strip()]
-if not cors_origins:
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+cors_regex = os.getenv("CORS_ORIGIN_REGEX", "").strip() or None
+
+if APP_ENV == "production":
+    if not cors_origins:
+        raise RuntimeError("CORS_ORIGIN must list the exact HTTPS frontend origin(s) in production.")
+    if cors_regex:
+        raise RuntimeError("CORS_ORIGIN_REGEX is disabled in production; use exact origins.")
+    if any(not origin.startswith("https://") or "*" in origin for origin in cors_origins):
+        raise RuntimeError("Production CORS_ORIGIN values must be explicit HTTPS origins.")
+elif not cors_origins:
     cors_origins = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:8080",
         "http://127.0.0.1:8080",
         "http://localhost:3000",
+        "http://127.0.0.1:3000",
     ]
 
 if "*" in cors_origins:
     raise RuntimeError("CORS_ORIGIN must contain explicit frontend origins, not '*'.")
-
-cors_regex = os.getenv("CORS_ORIGIN_REGEX", "").strip() or None
 
 app.add_middleware(
     CORSMiddleware,
@@ -152,18 +191,52 @@ async def health(db: AsyncSession = Depends(get_db)):
 from fastapi.responses import FileResponse
 
 @app.get("/uploads/{filename}")
-async def serve_upload(filename: str):
-    """Serve uploaded screenshot images for analysis history."""
+async def serve_upload(
+    filename: str,
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Serve an image only to the authenticated owner of its analysis."""
+    if Path(filename).name != filename or not __import__("re").fullmatch(
+        r"[a-f0-9]{32}\.(?:jpg|png|webp)", filename
+    ):
+        raise HTTPException(404, "File not found.")
     file_path = UPLOAD_DIR / filename
     if not file_path.exists():
         raise HTTPException(404, "File not found.")
+    owned_image = (
+        await db.execute(
+            select(Analysis.id).where(
+                Analysis.user_id == user.id,
+                Analysis.image_path == f"/uploads/{filename}",
+            )
+        )
+    ).scalar_one_or_none()
+    if not owned_image:
+        raise HTTPException(404, "File not found.")
     return FileResponse(file_path)
+
+
+async def _read_upload_limited(file: UploadFile, max_bytes: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while total <= max_bytes:
+        chunk = await file.read(min(64 * 1024, max_bytes + 1 - total))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+    if total > max_bytes:
+        raise HTTPException(413, "File is too large. Maximum size is 5 MB.")
+    return b"".join(chunks)
 
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
 
 @app.post("/api/auth/register")
-async def register(body: RegisterInput, db: AsyncSession = Depends(get_db)):
+async def register(body: RegisterInput, request: Request, db: AsyncSession = Depends(get_db)):
+    if not _check_rate(_rate_key(request, "register", True), RATE_REGISTER_MAX):
+        raise HTTPException(429, "Too many registration attempts. Please try again shortly.")
     # Validate password rules
     if not body.password or len(body.password) < 8:
         raise HTTPException(400, "Password must be at least 8 characters.")
@@ -202,6 +275,8 @@ async def login(body: LoginInput, request: Request, db: AsyncSession = Depends(g
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(401, "Invalid credentials.")
+    if user.status != "Active":
+        raise HTTPException(403, "This account is not active. Contact support.")
 
     ok = verify_password(body.password, user.password_hash)
 
@@ -229,6 +304,8 @@ async def admin_login(body: LoginInput, request: Request, db: AsyncSession = Dep
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(401, "Invalid credentials.")
+    if user.status != "Active":
+        raise HTTPException(403, "This account is not active. Contact support.")
 
     ok = verify_password(body.password, user.password_hash)
 
@@ -246,6 +323,25 @@ async def admin_login(body: LoginInput, request: Request, db: AsyncSession = Dep
         raise HTTPException(403, "Admin access required.")
 
     return auth_response(user)
+
+
+@app.post("/api/auth/logout")
+async def logout(
+    request: Request,
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Revoke the current bearer token; clients should still clear it immediately."""
+    authorization = request.headers.get("authorization", "")
+    token = authorization.partition(" ")[2].strip()
+    payload = verify_token(token)
+    if payload and isinstance(payload.get("jti"), str):
+        expires_at = int(payload.get("exp", 0))
+        existing = await db.get(RevokedToken, payload["jti"])
+        if existing is None:
+            db.add(RevokedToken(token_id=payload["jti"], expires_at=expires_at))
+            await db.commit()
+    return {"ok": True}
 
 
 # ── Admin: users ─────────────────────────────────────────────────────────────
@@ -291,6 +387,8 @@ async def delete_user(
     target = (await db.execute(select(User).where(User.id == user_id, User.role != "admin"))).scalar_one_or_none()
     if not target:
         raise HTTPException(404, "User not found or is an admin.")
+    await db.execute(delete(ScamReportOwner).where(ScamReportOwner.user_id == target.id))
+    await db.execute(delete(CompanyVerification).where(CompanyVerification.user_id == target.id))
     await db.delete(target)
     await db.commit()
     return {"ok": True}
@@ -303,7 +401,12 @@ async def list_reports(
     user: User = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(ScamReport).order_by(ScamReport.date.desc()))
+    statement = select(ScamReport)
+    if user.role != "admin":
+        statement = statement.join(
+            ScamReportOwner, ScamReportOwner.report_id == ScamReport.id
+        ).where(ScamReportOwner.user_id == user.id)
+    result = await db.execute(statement.order_by(ScamReport.date.desc()))
     reports = [
         {
             "id": r.id,
@@ -334,12 +437,13 @@ async def create_report(
     report = ScamReport(
         id=str(uuid.uuid4()),
         company=company,
-        reporter=body.reporter[:100] or "Anonymous",
+        reporter=user.name[:100],
         risk_level=body.riskLevel,
         details=body.details[:2000],
         status="Pending",
     )
     db.add(report)
+    db.add(ScamReportOwner(report_id=report.id, user_id=user.id))
     await db.commit()
     await db.refresh(report)
     return {
@@ -359,7 +463,7 @@ async def create_report(
 async def update_report(
     report_id: str,
     body: UpdateReportInput,
-    user: User = Depends(require_auth),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     if body.status and body.status not in VALID_REPORT_STATUS:
@@ -392,7 +496,7 @@ async def update_report(
 @app.delete("/api/reports/{report_id}")
 async def delete_report(
     report_id: str,
-    user: User = Depends(require_auth),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     target = (await db.execute(select(ScamReport).where(ScamReport.id == report_id))).scalar_one_or_none()
@@ -407,7 +511,6 @@ async def delete_report(
 
 @app.get("/api/companies")
 async def list_companies(
-    user: User = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(Company).order_by(Company.status, Company.name))
@@ -423,6 +526,51 @@ async def list_companies(
         for c in result.scalars().all()
     ]
     return {"companies": companies}
+
+
+@app.post("/api/company-verifications")
+async def verify_company_record(
+    body: CompanyVerificationInput,
+    user: User | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Compare a name against this platform's records; this is not external verification."""
+    query = body.query.strip()[:200]
+    if not query:
+        raise HTTPException(400, "Company name is required.")
+    company = (
+        await db.execute(select(Company).where(func.lower(Company.name) == query.lower()))
+    ).scalar_one_or_none()
+    status = company.status if company else "Not found in records"
+    company_name = company.name if company else query
+
+    if user is not None:
+        db.add(
+            CompanyVerification(
+                id=str(uuid.uuid4()),
+                user_id=user.id,
+                query=query,
+                company_name=company_name,
+                status=status,
+            )
+        )
+        await db.commit()
+
+    return {
+        "match": (
+            {
+                "id": company.id,
+                "name": company.name,
+                "domain": company.domain or "",
+                "status": company.status,
+                "reports": company.reports,
+                "last_checked": str(company.last_checked)[:10] if company.last_checked else "",
+            }
+            if company
+            else None
+        ),
+        "message": "Matched against records stored on this platform; this is not independent company verification.",
+    }
 
 
 @app.post("/api/companies")
@@ -463,7 +611,7 @@ async def create_company(
 async def update_company(
     company_id: str,
     body: UpdateCompanyInput,
-    user: User = Depends(require_auth),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     if body.status and body.status not in VALID_COMPANY_STATUS:
@@ -539,12 +687,15 @@ def _parse_json_list(raw: str | None) -> list:
 
 def _build_recommendations(signals: list, probability: int) -> list[str]:
     triggered = {s.name for s in signals if s.triggered}
+    categories = {s.category for s in signals if s.triggered}
     recs = []
 
-    if probability >= RISK_HIGH_THRESHOLD or "Suspicious Keywords" in triggered:
+    if probability >= RISK_HIGH_THRESHOLD or "payment" in categories or "Suspicious Keywords" in triggered:
         recs.append("Do not pay any registration, training, or application fee.")
-    if "Unrealistic Salary" in triggered:
+    if "pay" in categories or "task" in categories:
         recs.append("Compare the offered salary with typical ranges for the role before responding.")
+    if "credential" in categories:
+        recs.append("Never share OTPs, PINs, passwords, CVV, or banking credentials with a recruiter.")
     if "Missing/Insecure Website" in triggered:
         recs.append("Verify the company through its official website or trusted job boards.")
     if "Missing Company Info" in triggered:
@@ -563,36 +714,6 @@ def _build_recommendations(signals: list, probability: int) -> list[str]:
             seen.add(r)
             unique.append(r)
     return unique[:6]
-
-
-def _ai_payload_for_text(text: str) -> dict:
-    """Run Gemini with graceful fallback — never fail the whole request."""
-    try:
-        result = analyze_with_gemini(text)
-        return {
-            "available": True,
-            "explanation": result.explanation,
-            "red_flags": result.red_flags,
-            "risk_factors": result.risk_factors,
-            "confidence": result.confidence,
-        }
-    except GeminiUnavailableError as e:
-        return {
-            "available": False,
-            "reason": "GEMINI_API_KEY not configured or SDK missing. Rule-based results shown.",
-            "detail": str(e),
-        }
-    except AIAnalysisError as e:
-        if e.fallback_result:
-            return {
-                "available": True,
-                "explanation": e.fallback_result.explanation,
-                "red_flags": e.fallback_result.red_flags,
-                "risk_factors": e.fallback_result.risk_factors,
-                "confidence": 0.0,
-                "partial": True,
-            }
-        return {"available": False, "reason": str(e)}
 
 
 def _analysis_to_dict(row: Analysis) -> dict:
@@ -614,6 +735,7 @@ def _analysis_to_dict(row: Analysis) -> dict:
         "positives": _parse_json_list(row.positives),
         "keywords": _parse_json_list(row.keywords),
         "signals": signals,
+        "uncertainties": _uncertainties_from_signals(signals),
         "ai": {
             "available": row.ai_available,
             "explanation": row.ai_explanation or "",
@@ -622,6 +744,17 @@ def _analysis_to_dict(row: Analysis) -> dict:
         "ocr_mode": row.ocr_mode or "manual",
         "created_at": str(row.created_at)[:19] if row.created_at else "",
     }
+
+
+def _uncertainties_from_signals(signals: list[dict]) -> list[str]:
+    uncertainties = []
+    for signal in signals:
+        if signal.get("id") == "website_unverified":
+            uncertainties.append("No official website was included, so employer identity could not be checked from this text.")
+        elif signal.get("id") == "personal_email_domain":
+            domain = str(signal.get("evidence", "")).split("@")[-1]
+            uncertainties.append(f"Recruiter email uses a free email provider (@{domain}); verify the recruiter independently.")
+    return uncertainties
 
 
 @app.post("/api/analyze")
@@ -658,7 +791,7 @@ async def analyze_manual_endpoint(
 
     if not skip_ai:
         try:
-            ai_output = validate_with_gemini(
+            ai_output = await validate_with_gemini(
                 text=combined_text,
                 rule_findings=evidence_result.reasons,
                 extracted_data=evidence_result.extracted_data,
@@ -712,6 +845,11 @@ async def analyze_manual_endpoint(
             "weight": s.weight,
             "triggered": s.triggered,
             "evidence": s.evidence,
+            "id": s.id,
+            "category": s.category,
+            "severity": s.severity,
+            "confidence": s.confidence,
+            "contribution": s.contribution,
         } for s in evidence_result.signals]),
         ai_explanation=hybrid_result.ai_validation.get("additional_context", ""),
         ai_available=hybrid_result.ai_available,
@@ -729,6 +867,7 @@ async def analyze_manual_endpoint(
     response_data["final_score"] = hybrid_result.final_score
     response_data["ai_validation"] = hybrid_result.ai_validation
     response_data["confidence"] = hybrid_result.confidence
+    response_data["uncertainties"] = evidence_result.uncertainties
 
     return {"analysis": response_data}
 
@@ -769,9 +908,7 @@ async def analyze_screenshot_endpoint(
             f"Unsupported file format: {content_type}. Please upload JPG, JPEG, PNG, or WEBP.",
         )
 
-    image_bytes = await file.read()
-    if len(image_bytes) > MAX_IMAGE_BYTES:
-        raise HTTPException(413, "File is too large. Maximum size is 5 MB.")
+    image_bytes = await _read_upload_limited(file, MAX_IMAGE_BYTES)
     if not image_bytes:
         raise HTTPException(400, "Please upload a screenshot.")
 
@@ -843,7 +980,7 @@ async def analyze_screenshot_endpoint(
 
     if not skip_ai:
         try:
-            ai_output = validate_with_gemini(
+            ai_output = await validate_with_gemini(
                 text=extracted_text,
                 rule_findings=evidence_result.reasons,
                 extracted_data=evidence_result.extracted_data,
@@ -899,6 +1036,11 @@ async def analyze_screenshot_endpoint(
             "weight": s.weight,
             "triggered": s.triggered,
             "evidence": s.evidence,
+            "id": s.id,
+            "category": s.category,
+            "severity": s.severity,
+            "confidence": s.confidence,
+            "contribution": s.contribution,
         } for s in evidence_result.signals]),
         ai_explanation=hybrid_result.ai_validation.get("additional_context", ""),
         ai_available=hybrid_result.ai_available,
@@ -923,7 +1065,8 @@ async def analyze_screenshot_endpoint(
     response_data["ai_score"] = hybrid_result.ai_score
     response_data["final_score"] = hybrid_result.final_score
     response_data["ai_validation"] = hybrid_result.ai_validation
-    response_data["confidence"] = hybrid_result.confidence
+    response_data["confidence"] = round(hybrid_result.confidence * max(0.0, min(1.0, ocr_result.confidence / 100.0)), 3)
+    response_data["uncertainties"] = evidence_result.uncertainties
     response_data["ocr_quality"] = ocr_result.quality_score
     response_data["ocr_confidence"] = ocr_result.confidence
 
@@ -948,31 +1091,209 @@ async def list_analyses(
     return {"analyses": [_analysis_to_dict(r) for r in rows]}
 
 
+@app.post("/api/chat")
+async def chat(
+    body: ChatInput,
+    request: Request,
+    user: User | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Answer a safety question with bounded recent context; no chat text is persisted."""
+    rate_key = f"user:{user.id}:chat" if user else _rate_key(request, "chat", True)
+    if not _check_rate(rate_key, RATE_CHAT_MAX):
+        raise HTTPException(429, "Chat limit reached. Wait a minute and try again.")
+
+    history = [turn.model_dump() for turn in body.history[-8:]]
+    analysis_context = None
+    if user and wants_personal_analysis(body.message):
+        latest = (
+            await db.execute(
+                select(Analysis)
+                .where(Analysis.user_id == user.id)
+                .order_by(Analysis.created_at.desc())
+                .limit(1)
+            )
+        ).scalars().first()
+        if latest:
+            analysis_context = {
+                "job_title": latest.job_title or "",
+                "company": latest.company or "",
+                "score": latest.probability,
+                "risk": latest.risk,
+                "reasons": _parse_json_list(latest.reasons)[:10],
+                "signals": [
+                    {"name": signal.get("name"), "evidence": signal.get("evidence", "")}
+                    for signal in _parse_json_list(latest.signals)
+                    if signal.get("triggered")
+                ][:10],
+                "recommendations": _parse_json_list(latest.recommendations)[:8],
+            }
+
+    try:
+        reply = await asyncio.wait_for(
+            generate_chat_reply(body.message, history, analysis_context), timeout=26.0
+        )
+    except GeminiUnavailableError:
+        raise HTTPException(503, "The AI assistant is not configured right now. Please try again later.")
+    except asyncio.TimeoutError:
+        raise HTTPException(504, "The assistant took too long to respond. Please retry.")
+    except GeminiAnalysisError as exc:
+        logging.getLogger("scamshield").warning("Chat generation failed (%s)", type(exc).__name__)
+        raise HTTPException(502, "The assistant could not create a reliable response. Please retry.")
+    except Exception as exc:
+        logging.getLogger("scamshield").error("Chat request failed (%s)", type(exc).__name__)
+        raise HTTPException(502, "The assistant is temporarily unavailable. Please retry.")
+
+    return {
+        "reply": reply,
+        "model": os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
+        "analysis_context_used": analysis_context is not None,
+    }
+
+
 # ── Analytics ────────────────────────────────────────────────────────────────
+
+@app.get("/api/dashboard")
+async def user_dashboard(
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return dashboard counts and recent analyses for the authenticated user only."""
+    analyses_count = (
+        await db.execute(select(func.count(Analysis.id)).where(Analysis.user_id == user.id))
+    ).scalar() or 0
+    reports_count = (
+        await db.execute(
+            select(func.count(ScamReportOwner.report_id)).where(ScamReportOwner.user_id == user.id)
+        )
+    ).scalar() or 0
+    verifications_count = (
+        await db.execute(
+            select(func.count(CompanyVerification.id)).where(CompanyVerification.user_id == user.id)
+        )
+    ).scalar() or 0
+    recent_rows = (
+        await db.execute(
+            select(Analysis)
+            .where(Analysis.user_id == user.id)
+            .order_by(Analysis.created_at.desc())
+            .limit(10)
+        )
+    ).scalars().all()
+    return {
+        "stats": {
+            "jobsAnalyzed": analyses_count,
+            "reportsSubmitted": reports_count,
+            "companyChecks": verifications_count,
+        },
+        "recentAnalyses": [_analysis_to_dict(row) for row in recent_rows],
+    }
+
 
 @app.get("/api/analytics")
 async def analytics(
-    user: User = Depends(require_auth),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     total_users = (await db.execute(
         select(func.count(User.id)).where(User.role == "user")
     )).scalar() or 0
-
-    pending_reports = (await db.execute(
-        select(func.count(ScamReport.id)).where(ScamReport.status == "Pending")
-    )).scalar() or 0
-
+    jobs_analyzed = (await db.execute(select(func.count(Analysis.id)))).scalar() or 0
+    scams_detected = (
+        await db.execute(select(func.count(Analysis.id)).where(Analysis.risk == "High"))
+    ).scalar() or 0
+    pending_reports = (
+        await db.execute(select(func.count(ScamReport.id)).where(ScamReport.status == "Pending"))
+    ).scalar() or 0
     verified_companies = (await db.execute(
         select(func.count(Company.id)).where(Company.status == "Verified")
     )).scalar() or 0
 
+    dialect = db.get_bind().dialect.name
+    if dialect == "postgresql":
+        analysis_month = func.to_char(func.date_trunc("month", Analysis.created_at), "YYYY-MM")
+        report_month = func.to_char(func.date_trunc("month", ScamReport.date), "YYYY-MM")
+    else:
+        analysis_month = func.strftime("%Y-%m", Analysis.created_at)
+        report_month = func.strftime("%Y-%m", ScamReport.date)
+
+    analysis_month_rows = (
+        await db.execute(
+            select(
+                analysis_month.label("month"),
+                func.count(Analysis.id).label("jobs"),
+                func.sum(case((Analysis.risk == "High", 1), else_=0)).label("detected"),
+            )
+            .group_by(analysis_month)
+            .order_by(analysis_month.desc())
+            .limit(6)
+        )
+    ).all()
+    report_month_rows = (
+        await db.execute(
+            select(report_month.label("month"), func.count(ScamReport.id).label("reports"))
+            .group_by(report_month)
+            .order_by(report_month.desc())
+            .limit(6)
+        )
+    ).all()
+    monthly_values: dict[str, dict[str, int]] = {}
+    for row in analysis_month_rows:
+        if row.month:
+            monthly_values[row.month] = {"jobs": int(row.jobs or 0), "detected": int(row.detected or 0), "reports": 0}
+    for row in report_month_rows:
+        if row.month:
+            monthly_values.setdefault(row.month, {"jobs": 0, "detected": 0, "reports": 0})["reports"] = int(row.reports or 0)
+    monthly = [
+        {
+            "month": datetime.strptime(month, "%Y-%m").strftime("%b %Y"),
+            **monthly_values[month],
+        }
+        for month in sorted(monthly_values)[-6:]
+    ]
+
+    risk_rows = (
+        await db.execute(
+            select(Analysis.risk, func.count(Analysis.id))
+            .group_by(Analysis.risk)
+            .order_by(Analysis.risk)
+        )
+    ).all()
+    top_companies = (
+        await db.execute(
+            select(ScamReport.company, func.count(ScamReport.id).label("reports"))
+            .group_by(ScamReport.company)
+            .order_by(func.count(ScamReport.id).desc(), ScamReport.company)
+            .limit(5)
+        )
+    ).all()
+    recent_reports = (
+        await db.execute(select(ScamReport).order_by(ScamReport.date.desc()).limit(5))
+    ).scalars().all()
+
     return {
         "cards": {
             "totalUsers": total_users,
-            "jobsAnalyzed": 42318,
-            "scamsDetected": 12847,
+            "jobsAnalyzed": jobs_analyzed,
+            "scamsDetected": scams_detected,
             "reportsPending": pending_reports,
             "verifiedCompanies": verified_companies,
-        }
+            "detectionRate": round((scams_detected / jobs_analyzed) * 100, 1) if jobs_analyzed else 0,
+            "monthlyReports": sum(int(value["reports"]) for value in monthly_values.values()),
+        },
+        "monthly": monthly,
+        "riskDistribution": [{"risk": risk, "count": count} for risk, count in risk_rows],
+        "topCompanies": [{"company": name, "reports": count} for name, count in top_companies],
+        "recentReports": [
+            {
+                "id": report.id,
+                "company": report.company,
+                "reporter": report.reporter,
+                "date": str(report.date)[:10] if report.date else "",
+                "status": report.status,
+                "risk_level": report.risk_level,
+                "details": report.details or "",
+            }
+            for report in recent_reports
+        ],
     }

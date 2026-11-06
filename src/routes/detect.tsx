@@ -36,7 +36,6 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { analyzeJob, type JobInput } from "@/lib/scam-detector";
 import { ProtectedRoute } from "@/components/AuthProvider";
 import { api, type AnalysisResult } from "@/lib/api";
 
@@ -46,7 +45,8 @@ export const Route = createFileRoute("/detect")({
       { title: "Scam Detector — Analyze Any Job Posting | ScamShield.AI" },
       {
         name: "description",
-        content: "Paste job details or upload a screenshot — our AI scores scam probability in real-time.",
+        content:
+          "Paste job details or upload a screenshot — our AI scores scam probability in real-time.",
       },
     ],
   }),
@@ -108,10 +108,8 @@ function Detect() {
   const result: AnalysisResult | null = manualResult ?? screenshotResult;
   const activeSteps = method === "screenshot" ? SCREENSHOT_STEPS : MANUAL_STEPS;
 
-  const handleManualChange = (
-    key: keyof typeof manualInput,
-    value: string,
-  ) => setManualInput((prev) => ({ ...prev, [key]: value }));
+  const handleManualChange = (key: keyof typeof manualInput, value: string) =>
+    setManualInput((prev) => ({ ...prev, [key]: value }));
 
   const handleMethodChange = (newMethod: "manual" | "screenshot") => {
     setMethod(newMethod);
@@ -194,89 +192,27 @@ function Detect() {
     try {
       // Animate steps
       setCurrentStep(0);
+      let step = 0;
       stepInterval = window.setInterval(() => {
-        setCurrentStep((s) => Math.min(s + 1, MANUAL_STEPS.length - 1));
+        step += 1;
+        setCurrentStep(Math.min(step, MANUAL_STEPS.length - 1));
+        if (step >= MANUAL_STEPS.length - 1 && stepInterval !== null) {
+          window.clearInterval(stepInterval);
+          stepInterval = null;
+        }
       }, 400);
 
       let analysis: AnalysisResult | null = null;
 
-      try {
-        const res = await api.analyzeManual({
-          title: manualInput.title,
-          company: manualInput.company,
-          website: manualInput.website,
-          description: manualInput.description,
-        });
-        analysis = res.analysis;
-        if (res.analysis) {
-          const a: AnalysisResult = res.analysis;
-          setManualResult(a);
-        } else {
-          throw new Error("No analysis returned from server.");
-        }
-      } catch (apiError: unknown) {
-        if (apiError instanceof Error && (apiError as Error & { status?: number }).status === 401) {
-          toast.error("Session expired. Please log in again.");
-          setLoading(false);
-          return;
-        }
-        // Backend unavailable — use client-side rule engine as graceful fallback
-        const fallback: JobInput = {
-          title: manualInput.title,
-          company: manualInput.company,
-          website: manualInput.website,
-          description: manualInput.description,
-          email: "",
-          salary: "",
-          workType: "Remote",
-        };
-        const local = analyzeJob(fallback);
-        const mapped: AnalysisResult = {
-          id: `local-${Date.now()}`,
-          input_type: "manual",
-          job_title: manualInput.title,
-          company: manualInput.company,
-          website: manualInput.website,
-          description: manualInput.description,
-          image_path: "",
-          extracted_text: "",
-          probability: local.probability,
-          risk: local.risk,
-          safe: local.safe,
-          trust_score: Math.max(0, 100 - local.probability),
-          reasons: [...local.reasons],
-          positives: [...local.positives],
-          keywords: local.reasons.length
-            ? [local.reasons[0]]
-            : [],
-          signals: local.signals.map((s) => ({
-            name: s.name,
-            weight: s.weight,
-            triggered: s.triggered,
-          })),
-          ai: {
-            available: false,
-            reason: "AI analysis temporarily unavailable. Showing rule-based results.",
-          },
-          recommendations: local.safe
-            ? [
-                "This posting looks reasonable — verify via the official website before applying.",
-                "Never share OTPs or banking credentials with recruiters.",
-              ]
-            : [
-                "Do not pay any registration or processing fee.",
-                "Verify the company through its official website.",
-                "Do not share OTP, PIN, or banking credentials.",
-              ],
-          ocr_mode: "manual",
-          created_at: new Date().toISOString(),
-        };
-        analysis = mapped;
-        setManualResult(mapped);
-        toast.info(
-          "Backend unavailable — showing local analysis (rule-based only).",
-        );
-      }
+      const res = await api.analyzeManual({
+        title: manualInput.title,
+        company: manualInput.company,
+        website: manualInput.website,
+        description: manualInput.description,
+      });
+      analysis = res.analysis;
+      if (res.analysis) setManualResult(res.analysis);
+      else throw new Error("No analysis returned from server.");
 
       if (analysis) {
         toast[analysis.safe ? "success" : "warning"](
@@ -310,12 +246,17 @@ function Detect() {
     let stepInterval: number | null = null;
     try {
       setCurrentStep(0);
+      let step = 0;
       stepInterval = window.setInterval(() => {
-        setCurrentStep((s) => Math.min(s + 1, SCREENSHOT_STEPS.length - 1));
+        step += 1;
+        setCurrentStep(Math.min(step, SCREENSHOT_STEPS.length - 1));
+        if (step >= SCREENSHOT_STEPS.length - 1 && stepInterval !== null) {
+          window.clearInterval(stepInterval);
+          stepInterval = null;
+        }
       }, 500);
 
       try {
-        await new Promise((r) => setTimeout(r, 800)); // brief UX delay so steps are visible
         const payload = await api.analyzeScreenshot(screenshotFile);
 
         if (!payload || typeof payload.probability !== "number") {
@@ -338,9 +279,7 @@ function Detect() {
             ? apiError.message
             : "Screenshot analysis failed. Please try again.";
         const status =
-          apiError instanceof Error
-            ? (apiError as Error & { status?: number }).status
-            : undefined;
+          apiError instanceof Error ? (apiError as Error & { status?: number }).status : undefined;
         if (status === 401) {
           toast.error("Session expired. Please log in again.");
         } else {
@@ -356,23 +295,23 @@ function Detect() {
   };
 
   return (
-    <div className="container mx-auto px-4 py-12 max-w-6xl">
+    <div className="container mx-auto min-w-0 max-w-6xl px-4 py-8 sm:py-12">
       {/* Header */}
       <div className="text-center mb-8">
         <Badge variant="outline" className="mb-3 border-primary/40 text-primary">
           <Shield className="h-3 w-3 mr-1.5" /> AI Detector
         </Badge>
-        <h1 className="text-4xl md:text-5xl font-bold">
+        <h1 className="break-words text-3xl font-bold sm:text-4xl md:text-5xl">
           Analyze a <span className="text-gradient-cyber">Job Posting</span>
         </h1>
         <p className="text-muted-foreground mt-3 max-w-xl mx-auto">
-          Choose how you want to check — enter details manually or upload a screenshot and let
-          us do the rest.
+          Choose how you want to check — enter details manually or upload a screenshot and let us do
+          the rest.
         </p>
       </div>
 
       {/* Method selector */}
-      <Card className="p-6 md:p-7 mb-6">
+      <Card className="min-w-0 p-4 sm:p-6 md:p-7 mb-6">
         <h2 className="font-semibold text-base mb-4">How would you like to analyze the job?</h2>
         <div className="grid md:grid-cols-2 gap-4">
           <MethodCard
@@ -393,14 +332,11 @@ function Detect() {
       </Card>
 
       {/* Main content: form + results */}
-      <div className="grid lg:grid-cols-5 gap-6">
+      <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-5 lg:gap-6">
         {/* Left: active form */}
-        <div className="lg:col-span-3">
+        <div className="min-w-0 lg:col-span-3">
           {loading ? (
-            <AnalyzeSteps
-              steps={[...activeSteps]}
-              currentStep={currentStep}
-            />
+            <AnalyzeSteps steps={[...activeSteps]} currentStep={currentStep} />
           ) : method === "manual" ? (
             <ManualForm
               input={manualInput}
@@ -421,7 +357,7 @@ function Detect() {
         </div>
 
         {/* Right: results */}
-        <div className="lg:col-span-2 space-y-4">
+        <div className="min-w-0 space-y-4 lg:col-span-2">
           {loading && (
             <Card className="p-8 text-center">
               <Loader2 className="h-10 w-10 animate-spin text-primary mx-auto mb-4" />
@@ -442,7 +378,9 @@ function Detect() {
             </Card>
           )}
 
-          {!loading && result && <ResultView result={result} screenshotPreview={screenshotPreview} />}
+          {!loading && result && (
+            <ResultView result={result} screenshotPreview={screenshotPreview} />
+          )}
         </div>
       </div>
     </div>
@@ -494,9 +432,7 @@ function MethodCard({
         aria-hidden
         className={
           "h-5 w-5 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5 " +
-          (selected
-            ? "border-primary bg-primary"
-            : "border-muted-foreground/30")
+          (selected ? "border-primary bg-primary" : "border-muted-foreground/30")
         }
       >
         {selected && <span className="h-2 w-2 rounded-full bg-white" />}
@@ -715,13 +651,7 @@ function ScreenshotUpload({
   );
 }
 
-function AnalyzeSteps({
-  steps,
-  currentStep,
-}: {
-  steps: string[];
-  currentStep: number;
-}) {
+function AnalyzeSteps({ steps, currentStep }: { steps: string[]; currentStep: number }) {
   const icons: Record<number, React.ComponentType<{ className?: string }>> = {
     0: Upload,
     1: ScanLine,
@@ -743,7 +673,11 @@ function AnalyzeSteps({
               key={label}
               className={
                 "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm " +
-                (active ? "bg-primary/10 text-primary font-medium" : done ? "text-foreground" : "text-muted-foreground")
+                (active
+                  ? "bg-primary/10 text-primary font-medium"
+                  : done
+                    ? "text-foreground"
+                    : "text-muted-foreground")
               }
             >
               <span
@@ -783,7 +717,7 @@ function ResultView({
   screenshotPreview: string | null;
 }) {
   const riskColor =
-    result.risk === "High"
+    result.risk === "High" || result.risk === "Critical"
       ? "destructive"
       : result.risk === "Medium"
         ? "warning"
@@ -791,7 +725,7 @@ function ResultView({
   const Icon = result.safe ? ShieldCheck : ShieldAlert;
   const gradient = result.safe
     ? "bg-gradient-safe"
-    : result.risk === "High"
+    : result.risk === "High" || result.risk === "Critical"
       ? "bg-gradient-danger"
       : "bg-gradient-hero";
 
@@ -808,7 +742,9 @@ function ResultView({
       <div className="flex items-center justify-between bg-muted/60 p-4 rounded-xl border border-border">
         <div>
           <h3 className="font-semibold text-sm">Safety Report Ready</h3>
-          <p className="text-xs text-muted-foreground">Download the complete assessment as a professional PDF report.</p>
+          <p className="text-xs text-muted-foreground">
+            Download the complete assessment as a professional PDF report.
+          </p>
         </div>
         <Button
           onClick={() => {
@@ -836,7 +772,7 @@ function ResultView({
           <div className="rounded-lg bg-muted p-3 text-center">
             <div className="text-xs text-muted-foreground">Rule Engine</div>
             <div className="text-2xl font-bold tabular-nums text-primary">{ruleScore}</div>
-            <div className="text-xs text-muted-foreground">0–98</div>
+            <div className="text-xs text-muted-foreground">0–100</div>
           </div>
           <div className="rounded-lg bg-muted p-3 text-center">
             <div className="text-xs text-muted-foreground">AI Analysis</div>
@@ -924,7 +860,11 @@ function ResultView({
           {result.keywords.length > 0 ? (
             <div className="flex flex-wrap gap-2">
               {result.keywords.map((k, i) => (
-                <Badge key={i} variant="outline" className="border-destructive/40 text-destructive bg-destructive/5">
+                <Badge
+                  key={i}
+                  variant="outline"
+                  className="border-destructive/40 text-destructive bg-destructive/5"
+                >
                   {k}
                 </Badge>
               ))}
@@ -952,10 +892,24 @@ function ResultView({
                 >
                   {s.triggered ? "●" : "○"} {s.name}
                 </span>
-                <span className="font-mono">{s.triggered ? `+${s.weight}` : "0"}</span>
+                <span className="font-mono">{s.triggered ? `+${s.contribution ?? s.weight}` : "0"}</span>
+                {s.triggered && s.evidence && (
+                  <span className="ml-3 text-muted-foreground">“{s.evidence}”</span>
+                )}
               </div>
             ))}
           </div>
+        </Card>
+      )}
+
+      {result.uncertainties?.length > 0 && (
+        <Card className="p-5 border-warning/30">
+          <h3 className="font-semibold mb-2 text-sm">Unverified information</h3>
+          <ul className="space-y-1">
+            {result.uncertainties.map((item, index) => (
+              <li key={index} className="text-sm text-muted-foreground">{item}</li>
+            ))}
+          </ul>
         </Card>
       )}
 
@@ -984,19 +938,20 @@ function ResultView({
                 </ul>
               </div>
             )}
-            {result.ai_findings.suspicious_evidence && result.ai_findings.suspicious_evidence.length > 0 && (
-              <div>
-                <div className="text-xs font-semibold text-warning mb-2">Suspicious Evidence</div>
-                <ul className="space-y-1">
-                  {result.ai_findings.suspicious_evidence.map((e, i) => (
-                    <li key={i} className="text-sm flex gap-2">
-                      <span className="text-warning mt-0.5 shrink-0">◆</span>
-                      <span>{e}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+            {result.ai_findings.suspicious_evidence &&
+              result.ai_findings.suspicious_evidence.length > 0 && (
+                <div>
+                  <div className="text-xs font-semibold text-warning mb-2">Suspicious Evidence</div>
+                  <ul className="space-y-1">
+                    {result.ai_findings.suspicious_evidence.map((e, i) => (
+                      <li key={i} className="text-sm flex gap-2">
+                        <span className="text-warning mt-0.5 shrink-0">◆</span>
+                        <span>{e}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             {result.ai_findings.confidence !== undefined && (
               <div className="text-xs text-muted-foreground">
                 AI Confidence: {Math.round(result.ai_findings.confidence * 100)}%

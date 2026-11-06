@@ -4,17 +4,6 @@ import { useState } from "react";
 import { useTheme } from "./ThemeProvider";
 import { useAuth } from "@/components/AuthProvider";
 import { Button } from "@/components/ui/button";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 
 const guestNav = [
   { to: "/", label: "Home" },
@@ -101,7 +90,7 @@ export function Header() {
                 onClick={() => setOpen(false)}
                 activeOptions={{ exact: n.to === "/" }}
                 activeProps={{ className: "bg-primary/15 text-primary" }}
-                className="px-4 py-2 rounded-md text-sm font-medium hover:bg-muted"
+                className="flex min-h-11 items-center rounded-md px-4 py-2 text-sm font-medium hover:bg-muted"
               >
                 {n.label}
               </Link>
@@ -124,24 +113,13 @@ export function Header() {
 
 function LogoutButton({ onLogout, mobile = false }: { onLogout: () => void; mobile?: boolean }) {
   return (
-    <AlertDialog>
-      <AlertDialogTrigger asChild>
-        <Button variant={mobile ? "outline" : "ghost"} className={mobile ? "justify-start" : ""}>
-          <LogOut className="mr-2 h-4 w-4" /> Logout
-        </Button>
-      </AlertDialogTrigger>
-      <AlertDialogContent className="glass">
-        <AlertDialogHeader>
-          <AlertDialogTitle>End your session?</AlertDialogTitle>
-          <AlertDialogDescription>
-            You will be signed out and returned to guest access.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={onLogout}>Logout</AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <Button
+      type="button"
+      variant={mobile ? "outline" : "ghost"}
+      className={mobile ? "min-h-11 justify-start" : ""}
+      onClick={onLogout}
+    >
+      <LogOut className="mr-2 h-4 w-4" /> Logout
+    </Button>
   );
 }

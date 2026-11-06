@@ -29,10 +29,7 @@ function AdminLogin() {
     setLoading(true);
     const ok = await auth.adminLogin(email, password);
     setLoading(false);
-    if (!ok) {
-      toast.error("Invalid admin credentials.");
-      return;
-    }
+    if (!ok) return;
     toast.success("Login success animation complete.");
     window.setTimeout(() => navigate({ to: "/admin/dashboard" }), 0);
   };

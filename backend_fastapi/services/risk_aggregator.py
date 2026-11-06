@@ -16,6 +16,7 @@ from .gemini_service import AIValidationOutput
 # ─── Configuration ──────────────────────────────────────────────────────────
 
 RISK_HIGH_THRESHOLD = 60
+RISK_CRITICAL_THRESHOLD = 85
 RISK_MEDIUM_THRESHOLD = 30
 MAX_SCORE = 100
 
@@ -28,7 +29,7 @@ class HybridAnalysisResult:
     rule_score: int  # 0-100 from evidence engine
     ai_score: int  # 0-100 from AI contextual assessment
     final_score: int  # 0-100 combined score
-    risk_level: Literal["Low", "Medium", "High"]
+    risk_level: Literal["Low", "Medium", "High", "Critical"]
     safe: bool
     rule_findings: list[str]  # Evidence-based findings
     positives: list[str]  # Positive signals
@@ -39,8 +40,10 @@ class HybridAnalysisResult:
     confidence: float = 0.85
 
 
-def _determine_risk_level(score: int) -> Literal["Low", "Medium", "High"]:
+def _determine_risk_level(score: int) -> Literal["Low", "Medium", "High", "Critical"]:
     """Determine risk level from final score."""
+    if score >= RISK_CRITICAL_THRESHOLD:
+        return "Critical"
     if score >= RISK_HIGH_THRESHOLD:
         return "High"
     if score >= RISK_MEDIUM_THRESHOLD:
@@ -64,6 +67,11 @@ def _calculate_final_score(
     """
     if not ai_available:
         return min(rule_score, MAX_SCORE)
+
+    # Explicit payment/credential evidence must not be averaged down by an
+    # unrelated or uncertain model response.
+    if rule_score >= 80:
+        return min(MAX_SCORE, rule_score)
 
     # Validated rule score adjusted by validation score
     validated_rule_score = int(rule_score * max(0.5, validation_score))
@@ -135,20 +143,14 @@ def aggregate_evidence_and_ai(
     if ai_available:
         confidence = 0.5 * evidence_result.confidence + 0.5 * ai_output.confidence
 
-    # Combine findings and positive notes
-    all_findings = list(evidence_result.reasons)
-    if ai_output and ai_output.supported_findings:
-        for f in ai_output.supported_findings:
-            if f and f not in all_findings:
-                all_findings.append(f)
-
     return HybridAnalysisResult(
         rule_score=evidence_result.probability,
         ai_score=ai_score,
         final_score=final_score,
         risk_level=risk_level,
         safe=safe,
-        rule_findings=all_findings,
+        # Keep evidence-backed rule explanations separate from model assertions.
+        rule_findings=list(evidence_result.reasons),
         positives=evidence_result.positives,
         ai_validation=_extract_ai_validation_dict(ai_output),
         ai_available=ai_available,
@@ -167,7 +169,8 @@ def get_scoring_explanation() -> dict:
         "risk_thresholds": {
             "Low": f"0-{RISK_MEDIUM_THRESHOLD - 1}",
             "Medium": f"{RISK_MEDIUM_THRESHOLD}-{RISK_HIGH_THRESHOLD - 1}",
-            "High": f"{RISK_HIGH_THRESHOLD}-100",
+            "High": f"{RISK_HIGH_THRESHOLD}-{RISK_CRITICAL_THRESHOLD - 1}",
+            "Critical": f"{RISK_CRITICAL_THRESHOLD}-100",
         },
         "fallback": "If AI unavailable, evidence-based rule engine is used directly",
     }

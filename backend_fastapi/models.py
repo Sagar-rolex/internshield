@@ -42,6 +42,19 @@ class ScamReport(Base):
     details: Mapped[str | None] = mapped_column(Text, default="")
 
 
+class ScamReportOwner(Base):
+    """Links a user to reports they submitted without guessing owners for old rows."""
+
+    __tablename__ = "scam_report_owners"
+
+    report_id: Mapped[str] = mapped_column(
+        ForeignKey("scam_reports.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True
+    )
+
+
 class Company(Base):
     __tablename__ = "companies"
 
@@ -59,6 +72,28 @@ class Company(Base):
             "status IN ('Verified', 'Blacklisted')", name="ck_company_status"
         ),
     )
+
+
+class CompanyVerification(Base):
+    __tablename__ = "company_verifications"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    query: Mapped[str] = mapped_column(String, nullable=False)
+    company_name: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(), nullable=False, index=True
+    )
+
+
+class RevokedToken(Base):
+    __tablename__ = "revoked_tokens"
+
+    token_id: Mapped[str] = mapped_column(String, primary_key=True)
+    expires_at: Mapped[int] = mapped_column(nullable=False, index=True)
 
 
 class Analysis(Base):

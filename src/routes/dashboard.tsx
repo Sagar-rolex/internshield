@@ -53,13 +53,13 @@ function DashboardRoute() {
 function Dashboard() {
   const { user } = useAuth();
   return (
-    <div className="container mx-auto px-4 py-12">
+    <div className="container mx-auto min-w-0 px-4 py-8 sm:py-12">
       <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
         <div>
           <Badge variant="outline" className="mb-3 border-primary/40 text-primary">
             <ShieldCheck className="mr-1.5 h-3 w-3" /> User Dashboard
           </Badge>
-          <h1 className="text-4xl font-bold">
+          <h1 className="break-words text-3xl font-bold sm:text-4xl">
             Welcome back, <span className="text-gradient-cyber">{user?.name.split(" ")[0]}</span>
           </h1>
           <p className="mt-2 text-muted-foreground">Your job-safety workspace is ready.</p>
@@ -67,11 +67,11 @@ function Dashboard() {
         <Badge className="bg-success/15 text-success hover:bg-success/15">Session Active</Badge>
       </div>
 
-      <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-8 grid min-w-0 grid-cols-1 gap-4 min-[480px]:grid-cols-2 2xl:grid-cols-4">
         {stats.map((item) => (
           <Card
             key={item.label}
-            className="glass p-6 shadow-card transition-all hover:-translate-y-1"
+            className="glass min-w-0 p-4 shadow-card transition-all hover:-translate-y-1 sm:p-6"
           >
             <div
               className={`mb-4 flex h-11 w-11 items-center justify-center rounded-lg ${item.tone}`}
@@ -79,12 +79,12 @@ function Dashboard() {
               <item.icon className="h-5 w-5" />
             </div>
             <div className="text-3xl font-bold">{item.value}</div>
-            <div className="mt-1 text-sm text-muted-foreground">{item.label}</div>
+            <div className="mt-1 break-words text-sm text-muted-foreground">{item.label}</div>
           </Card>
         ))}
       </div>
 
-      <div className="mb-8 grid gap-4 md:grid-cols-4">
+      <div className="mb-8 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {[
           { label: "Analyze New Job", to: "/detect", icon: PlusCircle },
           { label: "Report Scam", to: "/report", icon: FileWarning },
@@ -95,7 +95,7 @@ function Dashboard() {
             key={action.label}
             asChild
             variant="outline"
-            className="h-20 justify-start glass text-left"
+            className="h-auto min-h-16 justify-start whitespace-normal px-3 py-3 text-left glass sm:min-h-20 sm:px-4"
           >
             <Link to={action.to}>
               <action.icon className="mr-3 h-5 w-5 text-primary" />
@@ -105,9 +105,9 @@ function Dashboard() {
         ))}
       </div>
 
-      <Card className="p-6">
+      <Card className="min-w-0 overflow-hidden p-3 sm:p-6">
         <h2 className="mb-4 text-lg font-semibold">Recent Analysis</h2>
-        <div className="min-w-0 overflow-x-auto">
+        <div className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain">
           <table className="w-full min-w-[560px] text-sm">
             <thead>
               <tr className="border-b text-left text-xs uppercase text-muted-foreground">

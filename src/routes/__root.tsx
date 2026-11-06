@@ -130,7 +130,7 @@ function RootComponent() {
         <AuthProvider>
           <div className="min-h-screen flex flex-col">
             <Header />
-            <main className="flex-1">
+            <main className="min-w-0 flex-1">
               <Outlet />
             </main>
             <Footer />

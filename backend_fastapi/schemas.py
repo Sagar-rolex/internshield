@@ -2,7 +2,8 @@
 Pydantic schemas for request validation + response shapes.
 Matches the exact JSON the frontend expects.
 """
-from pydantic import BaseModel, EmailStr, Field
+from typing import Literal
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -70,6 +71,10 @@ class CreateCompanyInput(BaseModel):
     status: str = "Verified"
 
 
+class CompanyVerificationInput(BaseModel):
+    query: str = Field(..., min_length=1, max_length=200)
+
+
 class UpdateCompanyInput(BaseModel):
     name: str | None = None
     domain: str | None = None
@@ -79,13 +84,13 @@ class UpdateCompanyInput(BaseModel):
 
 # ── Analysis ─────────────────────────────────────────────────────────────────
 class AnalyzeManualInput(BaseModel):
-    title: str
-    company: str
-    website: str = ""
-    description: str = ""
-    email: str = ""
-    salary: str = ""
-    workType: str = "Remote"
+    title: str = Field(..., min_length=1, max_length=200)
+    company: str = Field(..., min_length=1, max_length=150)
+    website: str = Field(default="", max_length=300)
+    description: str = Field(default="", max_length=10000)
+    email: str = Field(default="", max_length=254)
+    salary: str = Field(default="", max_length=100)
+    workType: str = Field(default="Remote", max_length=40)
 
 
 class AnalysisOut(BaseModel):
@@ -105,6 +110,7 @@ class AnalysisOut(BaseModel):
     positives: list[str]
     keywords: list[str]
     signals: list[dict]
+    uncertainties: list[str] = Field(default_factory=list)
     ai: dict
     recommendations: list[str]
     ocr_mode: str
@@ -115,6 +121,18 @@ class AnalysisOut(BaseModel):
     final_score: int | None = None
     ai_findings: dict | None = None
     ai_error: str | None = None
+
+
+class ChatTurn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    role: Literal["user", "assistant"]
+    content: str = Field(..., min_length=1, max_length=1600)
+
+
+class ChatInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    message: str = Field(..., min_length=1, max_length=1500)
+    history: list[ChatTurn] = Field(default_factory=list, max_length=8)
 
 
 class CompanyOut(BaseModel):

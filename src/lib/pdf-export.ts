@@ -24,11 +24,7 @@ export function generatePdfReport(result: AnalysisResult) {
   });
 
   const riskColorClass =
-    result.risk === "High"
-      ? "#ef4444"
-      : result.risk === "Medium"
-        ? "#f59e0b"
-        : "#10b981";
+    result.risk === "High" ? "#ef4444" : result.risk === "Medium" ? "#f59e0b" : "#10b981";
 
   const htmlContent = `
 <!DOCTYPE html>

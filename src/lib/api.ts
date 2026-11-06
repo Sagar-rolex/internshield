@@ -6,7 +6,10 @@ import type { AuthUser } from "@/components/AuthProvider";
 
 const configuredApiUrl =
   typeof import.meta !== "undefined" ? import.meta.env?.VITE_API_URL?.trim() : undefined;
-const API_URL = (configuredApiUrl || "https://internshield-backend.onrender.com/api").replace(/\/+$/, "");
+const defaultApiUrl = import.meta.env.DEV
+  ? "http://127.0.0.1:4001/api"
+  : "https://internshield-backend.onrender.com/api";
+const API_URL = (configuredApiUrl || defaultApiUrl).replace(/\/+$/, "");
 
 const AUTH_KEY = "scamshield.auth.token";
 
@@ -69,7 +72,10 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       // Authentication uses the Authorization bearer token; cookies are not used by this API.
       credentials: "omit",
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.name === "TimeoutError") {
+      throw new Error("The assistant took too long to respond. Please retry.");
+    }
     throw new Error(
       "Could not reach the analysis service. Check your network and API configuration, then retry.",
     );
@@ -185,7 +191,10 @@ export const api = {
       body: JSON.stringify(input),
     }),
 
-  updateCompany: (id: string, input: { name?: string; domain?: string; status?: string; reports?: number }) =>
+  updateCompany: (
+    id: string,
+    input: { name?: string; domain?: string; status?: string; reports?: number },
+  ) =>
     request<{ company: ApiCompany }>(`/companies/${encodeURIComponent(id)}`, {
       method: "PATCH",
       body: JSON.stringify(input),
@@ -225,14 +234,34 @@ export const api = {
   },
 
   analyses: () => request<{ analyses: AnalysisResult[] }>("/analyses"),
+  chat: (input: ChatInput) =>
+    request<ChatResponse>("/chat", {
+      method: "POST",
+      body: JSON.stringify(input),
+      signal: AbortSignal.timeout(30_000),
+    }),
 };
 
 // ── Analysis Types ───────────────────────────────────────────────────────────
 
 export type AnalysisSignal = {
+  id?: string;
+  category?: string;
   name: string;
   weight: number;
   triggered: boolean;
+  severity?: string;
+  confidence?: number;
+  contribution?: number;
+  evidence?: string;
+};
+
+export type ChatTurn = { role: "user" | "assistant"; content: string };
+export type ChatInput = { message: string; history: ChatTurn[] };
+export type ChatResponse = {
+  reply: string;
+  model: string;
+  analysis_context_used: boolean;
 };
 
 export type AnalysisAI = {
@@ -256,13 +285,14 @@ export type AnalysisResult = {
   image_path: string;
   extracted_text: string;
   probability: number;
-  risk: "Low" | "Medium" | "High";
+  risk: "Low" | "Medium" | "High" | "Critical";
   safe: boolean;
   trust_score: number;
   reasons: string[];
   positives: string[];
   keywords: string[];
   signals: AnalysisSignal[];
+  uncertainties: string[];
   ai: AnalysisAI;
   recommendations: string[];
   ocr_mode: string;

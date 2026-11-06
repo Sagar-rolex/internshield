@@ -106,66 +106,77 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loginInFlight = useRef(false);
 
-  const login = useCallback(async (email: string, password: string) => {
-    if (loginInFlight.current) return false;
-    loginInFlight.current = true;
-    try {
-      const { user: next, token } = await api.login(email, password);
-      if (next.role !== "user") {
-        toast.error("Invalid credentials. Please check your account type.");
+  const login = useCallback(
+    async (email: string, password: string) => {
+      if (loginInFlight.current) return false;
+      loginInFlight.current = true;
+      try {
+        const { user: next, token } = await api.login(email, password);
+        if (next.role !== "user") {
+          toast.error("Invalid credentials. Please check your account type.");
+          return false;
+        }
+        persist(next, token);
+        toast.success("Login successful. Welcome back.");
+        return true;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Login failed.";
+        toast.error(message);
         return false;
+      } finally {
+        loginInFlight.current = false;
       }
-      persist(next, token);
-      toast.success("Login successful. Welcome back.");
-      return true;
-    } catch {
-      toast.error("Login failed. Please check your credentials.");
-      return false;
-    } finally {
-      loginInFlight.current = false;
-    }
-  }, [persist]);
+    },
+    [persist],
+  );
 
   const registerInFlight = useRef(false);
 
-  const register = useCallback(async (input: RegisterInput) => {
-    if (registerInFlight.current) return false;
-    registerInFlight.current = true;
-    try {
-      const { user: next, token } = await api.register(input);
-      persist(next, token);
-      toast.success("Account created successfully.");
-      return true;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Registration failed.";
-      toast.error(message);
-      return false;
-    } finally {
-      registerInFlight.current = false;
-    }
-  }, [persist]);
+  const register = useCallback(
+    async (input: RegisterInput) => {
+      if (registerInFlight.current) return false;
+      registerInFlight.current = true;
+      try {
+        const { user: next, token } = await api.register(input);
+        persist(next, token);
+        toast.success("Account created successfully.");
+        return true;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Registration failed.";
+        toast.error(message);
+        return false;
+      } finally {
+        registerInFlight.current = false;
+      }
+    },
+    [persist],
+  );
 
   const adminLoginInFlight = useRef(false);
 
-  const adminLogin = useCallback(async (email: string, password: string) => {
-    if (adminLoginInFlight.current) return false;
-    adminLoginInFlight.current = true;
-    try {
-      const { user: next, token } = await api.adminLogin(email, password);
-      if (next.role !== "admin") {
-        toast.error("Invalid credentials. Please use an admin account.");
+  const adminLogin = useCallback(
+    async (email: string, password: string) => {
+      if (adminLoginInFlight.current) return false;
+      adminLoginInFlight.current = true;
+      try {
+        const { user: next, token } = await api.adminLogin(email, password);
+        if (next.role !== "admin") {
+          toast.error("Invalid credentials. Please use an admin account.");
+          return false;
+        }
+        persist(next, token);
+        toast.success("Admin login successful.");
+        return true;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Admin login failed.";
+        toast.error(message);
         return false;
+      } finally {
+        adminLoginInFlight.current = false;
       }
-      persist(next, token);
-      toast.success("Admin login successful.");
-      return true;
-    } catch {
-      toast.error("Admin login failed. Please check your credentials.");
-      return false;
-    } finally {
-      adminLoginInFlight.current = false;
-    }
-  }, [persist]);
+    },
+    [persist],
+  );
 
   const logout = useCallback(() => {
     persist(null);
@@ -210,8 +221,7 @@ export function ProtectedRoute({
     );
   }
 
-  if (!auth.user)
-    return <Navigate to="/login" search={{ redirect }} replace />;
+  if (!auth.user) return <Navigate to="/login" search={{ redirect }} replace />;
 
   if (auth.role !== role) {
     // Admin superset: allow admin into "user" guarded routes

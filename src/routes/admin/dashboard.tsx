@@ -3,7 +3,11 @@ import { Building2, FileWarning, ShieldAlert, Users, Activity } from "lucide-rea
 import { AdminShell } from "@/components/AdminShell";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { BarTrendChart, DonutTrendChart, LineTrendChart } from "@/components/admin/LightweightCharts";
+import {
+  BarTrendChart,
+  DonutTrendChart,
+  LineTrendChart,
+} from "@/components/admin/LightweightCharts";
 
 export const Route = createFileRoute("/admin/dashboard")({
   component: AdminDashboard,
@@ -55,24 +59,24 @@ function AdminDashboard() {
         <Badge variant="outline" className="mb-3 border-primary/40 text-primary">
           Premium Dashboard
         </Badge>
-        <h1 className="text-4xl font-bold">Admin Dashboard</h1>
+        <h1 className="break-words text-3xl font-bold sm:text-4xl">Admin Dashboard</h1>
         <p className="mt-2 text-muted-foreground">
           Operational overview of users, analysis volume, reports, and company intelligence.
         </p>
       </div>
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="mb-6 grid min-w-0 grid-cols-1 gap-4 min-[480px]:grid-cols-2 2xl:grid-cols-5">
         {cards.map((card) => (
-          <Card key={card.label} className="glass p-5 shadow-card">
+          <Card key={card.label} className="glass min-w-0 p-4 shadow-card sm:p-5">
             <card.icon className="mb-4 h-6 w-6 text-primary" />
             <div className="text-2xl font-bold">{card.value}</div>
-            <div className="text-sm text-muted-foreground">{card.label}</div>
+            <div className="break-words text-sm text-muted-foreground">{card.label}</div>
           </Card>
         ))}
       </div>
 
-      <div className="mb-6 grid gap-6 xl:grid-cols-2">
-        <Card className="p-6">
+      <div className="mb-6 grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-6">
+        <Card className="min-w-0 overflow-hidden p-4 sm:p-6">
           <h2 className="mb-4 font-semibold">Monthly Analysis</h2>
           <BarTrendChart
             data={monthly.map(({ month, analysis, scams }) => ({
@@ -83,7 +87,7 @@ function AdminDashboard() {
             label="Monthly job analyses and scam detections"
           />
         </Card>
-        <Card className="p-6">
+        <Card className="min-w-0 overflow-hidden p-4 sm:p-6">
           <h2 className="mb-4 font-semibold">Scam Categories</h2>
           <DonutTrendChart
             data={categories.map(({ name, value }, index) => ({
@@ -95,8 +99,8 @@ function AdminDashboard() {
         </Card>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-2">
-        <Card className="p-6">
+      <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-6">
+        <Card className="min-w-0 overflow-hidden p-4 sm:p-6">
           <h2 className="mb-4 font-semibold">User Growth</h2>
           <LineTrendChart
             data={monthly.map(({ month, analysis }) => ({ label: month, value: analysis }))}
@@ -104,7 +108,7 @@ function AdminDashboard() {
             label="Monthly user growth"
           />
         </Card>
-        <Card className="p-6">
+        <Card className="min-w-0 overflow-hidden p-4 sm:p-6">
           <h2 className="mb-4 font-semibold">Recent Reports</h2>
           <div className="space-y-3">
             {recentReports.map((report) => (

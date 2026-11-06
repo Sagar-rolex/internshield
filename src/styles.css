@@ -149,7 +149,7 @@
   .shadow-card { box-shadow: var(--shadow-card); }
   .glass {
     background-color: color-mix(in oklab, var(--card) 60%, transparent);
-    backdrop-filter: blur(12px);
+    backdrop-filter: blur(8px);
     border: 1px solid color-mix(in oklab, var(--border) 80%, transparent);
   }
   .grid-bg {
@@ -161,6 +161,23 @@
   .animate-float { animation: float 6s ease-in-out infinite; }
   .animate-pulse-glow { animation: pulse-glow 2.5s ease-in-out infinite; }
   .animate-gradient { background-size: 200% 200%; animation: gradient-shift 8s ease infinite; }
+}
+
+@media (max-width: 640px) {
+  .glass { backdrop-filter: none; }
+  .animate-float,
+  .animate-pulse-glow,
+  .animate-gradient { animation: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 @keyframes float {

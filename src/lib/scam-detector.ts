@@ -76,14 +76,16 @@ const SCAM_PATTERNS = [
     weight: 20,
     regex:
       /(?:contact|apply|dm|reach\s+out|message)\s+(?:via|on|at|through)?\s*(?:whatsapp|telegram|signal|google\s+chat|viber)|whatsapp\s+only|telegram\s+only|wa\.me\/|t\.me\/|join\s+telegram\s+group/i,
-    reason: (match: string) => `Directs applicants solely to off-platform messaging apps ("${match}")`,
+    reason: (match: string) =>
+      `Directs applicants solely to off-platform messaging apps ("${match}")`,
   },
   {
     category: "Task, Rating, or Ponzi Scams",
     weight: 25,
     regex:
       /(?:like\s+(?:and|&)\s+subscribe|youtube\s+video\s+(?:like|review)|daily\s+task\s+earning|ad\s+clicking|copy\s+paste\s+work|sms\s+sending\s+job|earn\s+(?:daily|per\s+day|hourly)\s*(?:₹|\$|rs\.?|inr)?\s*\d+|daily\s+payouts?|part[\s-]time\s+data\s+entry\s+earn\s+money)/i,
-    reason: (match: string) => `Indicates a micro-task, review, or fake daily payout scheme ("${match}")`,
+    reason: (match: string) =>
+      `Indicates a micro-task, review, or fake daily payout scheme ("${match}")`,
   },
   {
     category: "Unrealistic Guarantees & False Urgency",
@@ -133,10 +135,9 @@ function isUnrealisticSalary(raw: string, titleAndDesc: string): boolean {
   const hasDollar = /\$|usd/i.test(raw);
 
   // Check for intern or entry-level roles
-  const isEntryRole =
-    /intern|student|trainee|fresher|data\s+entry|typing|assistant|beginner/i.test(
-      titleAndDesc,
-    );
+  const isEntryRole = /intern|student|trainee|fresher|data\s+entry|typing|assistant|beginner/i.test(
+    titleAndDesc,
+  );
 
   // Daily payout anomalies (e.g., earn 5000/day for data entry or internship)
   if (hasPerDay && cleanNum >= (hasRupee ? 3000 : 300) && isEntryRole) return true;

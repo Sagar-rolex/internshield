@@ -35,12 +35,12 @@ const team = [
 
 function About() {
   return (
-    <div className="container mx-auto px-4 py-12 max-w-5xl">
+    <div className="container mx-auto min-w-0 max-w-5xl px-4 py-8 sm:py-12">
       <div className="text-center mb-12">
         <Badge variant="outline" className="mb-3 border-primary/40 text-primary">
           <GraduationCap className="h-3 w-3 mr-1.5" /> Mini Project
         </Badge>
-        <h1 className="text-4xl md:text-5xl font-bold">
+        <h1 className="break-words text-3xl font-bold sm:text-4xl md:text-5xl">
           About <span className="text-gradient-cyber">ScamShield.AI</span>
         </h1>
         <p className="text-muted-foreground mt-4 max-w-2xl mx-auto">
@@ -49,8 +49,8 @@ function About() {
         </p>
       </div>
 
-      <div className="grid md:grid-cols-3 gap-6 mb-12">
-        <Card className="p-6">
+      <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 sm:gap-6 mb-12">
+        <Card className="min-w-0 p-4 sm:p-6">
           <Target className="h-8 w-8 text-primary mb-3" />
           <h3 className="font-semibold mb-2">Purpose</h3>
           <p className="text-sm text-muted-foreground">
@@ -58,7 +58,7 @@ function About() {
             verify any posting in seconds, before falling for fees or data theft.
           </p>
         </Card>
-        <Card className="p-6">
+        <Card className="min-w-0 p-4 sm:p-6">
           <Brain className="h-8 w-8 text-accent mb-3" />
           <h3 className="font-semibold mb-2">How AI/ML Helps</h3>
           <p className="text-sm text-muted-foreground">
@@ -67,7 +67,7 @@ function About() {
             explainable reasoning.
           </p>
         </Card>
-        <Card className="p-6">
+        <Card className="min-w-0 p-4 sm:p-6">
           <Lightbulb className="h-8 w-8 text-warning mb-3" />
           <h3 className="font-semibold mb-2">Why It Matters</h3>
           <p className="text-sm text-muted-foreground">
@@ -77,7 +77,7 @@ function About() {
         </Card>
       </div>
 
-      <Card className="p-8 mb-12">
+      <Card className="min-w-0 p-4 sm:p-8 mb-12">
         <h2 className="text-2xl font-bold mb-6">Technology Stack</h2>
         <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-4">
           {tech.map((t) => (
@@ -94,7 +94,7 @@ function About() {
         </div>
       </Card>
 
-      <Card className="p-8">
+      <Card className="min-w-0 p-4 sm:p-8">
         <h2 className="text-2xl font-bold mb-6">Project Team</h2>
         <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-4">
           {team.map((m) => (

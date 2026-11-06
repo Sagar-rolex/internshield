@@ -24,20 +24,20 @@ function Contact() {
         <Badge variant="outline" className="mb-3 border-primary/40 text-primary">
           <MessageSquare className="mr-1.5 h-3 w-3" /> Contact
         </Badge>
-        <h1 className="text-4xl font-bold">Talk to ScamShield</h1>
+        <h1 className="text-3xl font-bold sm:text-4xl">Talk to ScamShield</h1>
         <p className="mt-3 text-muted-foreground">
           Questions, reports, partnership requests, and student safety support.
         </p>
       </div>
       <div className="grid gap-6 lg:grid-cols-5">
-        <Card className="glass p-6 lg:col-span-2">
+        <Card className="glass min-w-0 p-4 sm:p-6 lg:col-span-2">
           <div className="space-y-5 text-sm">
             <Info icon={Mail} label="Email" value="support@internshield.com" />
             <Info icon={Phone} label="Phone" value="+91 8591189235" />
             <Info icon={MapPin} label="Office" value="Student Innovation Cell, India" />
           </div>
         </Card>
-        <Card className="p-6 lg:col-span-3">
+        <Card className="min-w-0 p-4 sm:p-6 lg:col-span-3">
           <form onSubmit={submit} className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
@@ -67,11 +67,11 @@ function Contact() {
 
 function Info({ icon: Icon, label, value }: { icon: typeof Mail; label: string; value: string }) {
   return (
-    <div className="flex gap-3 rounded-lg bg-muted/40 p-4">
-      <Icon className="h-5 w-5 text-primary" />
-      <div>
+    <div className="flex min-w-0 gap-3 rounded-lg bg-muted/40 p-4">
+      <Icon className="h-5 w-5 shrink-0 text-primary" />
+      <div className="min-w-0">
         <div className="font-medium">{label}</div>
-        <div className="text-muted-foreground">{value}</div>
+        <div className="break-words text-muted-foreground">{value}</div>
       </div>
     </div>
   );

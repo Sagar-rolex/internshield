@@ -70,7 +70,7 @@ function Report() {
 
   if (submitted) {
     return (
-      <div className="container mx-auto px-4 py-20 max-w-xl text-center">
+      <div className="container mx-auto max-w-xl px-4 py-12 text-center sm:py-20">
         <div className="h-20 w-20 rounded-full bg-success/15 flex items-center justify-center mx-auto mb-4">
           <CheckCircle2 className="h-10 w-10 text-success" />
         </div>
@@ -98,12 +98,12 @@ function Report() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-12 max-w-3xl">
+    <div className="container mx-auto min-w-0 max-w-3xl px-4 py-8 sm:py-12">
       <div className="text-center mb-10">
         <Badge variant="outline" className="mb-3 border-destructive/40 text-destructive">
           <FileWarning className="h-3 w-3 mr-1.5" /> Community Reporting
         </Badge>
-        <h1 className="text-4xl md:text-5xl font-bold">
+        <h1 className="break-words text-3xl font-bold sm:text-4xl md:text-5xl">
           Report a <span className="text-gradient-cyber">Scam Posting</span>
         </h1>
         <p className="text-muted-foreground mt-3">
@@ -111,7 +111,7 @@ function Report() {
         </p>
       </div>
 
-      <Card className="p-6 md:p-8">
+      <Card className="min-w-0 p-4 sm:p-6 md:p-8">
         <form onSubmit={submit} className="space-y-5">
           <div className="grid md:grid-cols-2 gap-4">
             <div className="space-y-2">
@@ -145,9 +145,7 @@ function Report() {
           <div className="space-y-2">
             <Label>Screenshot (optional)</Label>
             {!file ? (
-              <label
-                className="flex flex-col items-center justify-center border-2 border-dashed border-border rounded-lg p-8 cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors"
-              >
+              <label className="flex flex-col items-center justify-center border-2 border-dashed border-border rounded-lg p-8 cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors">
                 <Upload className="h-8 w-8 text-muted-foreground mb-2" />
                 <span className="text-sm font-medium">Click to upload</span>
                 <span className="text-xs text-muted-foreground mt-1">PNG, JPG up to 10MB</span>
@@ -161,7 +159,11 @@ function Report() {
             ) : (
               <div className="relative rounded-lg border border-border p-3 flex items-center gap-3">
                 {preview && (
-                  <img src={preview} alt="Screenshot preview" className="h-16 w-16 object-cover rounded" />
+                  <img
+                    src={preview}
+                    alt="Screenshot preview"
+                    className="h-16 w-16 object-cover rounded"
+                  />
                 )}
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-sm truncate">{file.name}</div>

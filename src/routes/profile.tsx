@@ -22,24 +22,24 @@ function ProfileRoute() {
 function Profile() {
   const { user, logout } = useAuth();
   return (
-    <div className="container mx-auto max-w-4xl px-4 py-12">
+    <div className="container mx-auto min-w-0 max-w-4xl px-4 py-8 sm:py-12">
       <Card className="glass overflow-hidden shadow-card">
-        <div className="bg-gradient-hero p-8 text-primary-foreground">
+        <div className="bg-gradient-hero p-5 text-primary-foreground sm:p-8">
           <Avatar className="h-24 w-24 border-4 border-white/30">
             <AvatarFallback className="bg-white/20 text-2xl text-white">
               {user?.photo}
             </AvatarFallback>
           </Avatar>
-          <h1 className="mt-5 text-3xl font-bold">{user?.name}</h1>
-          <p className="text-primary-foreground/80">{user?.email}</p>
+          <h1 className="mt-5 break-words text-2xl font-bold sm:text-3xl">{user?.name}</h1>
+          <p className="break-all text-primary-foreground/80">{user?.email}</p>
         </div>
-        <div className="grid gap-4 p-6 md:grid-cols-2">
+        <div className="grid min-w-0 gap-4 p-4 sm:p-6 md:grid-cols-2">
           <Info icon={Phone} label="Phone Number" value={user?.phone ?? "Not added"} />
           <Info icon={School} label="College" value={user?.college ?? "Not added"} />
           <Info icon={UserRound} label="Course" value={user?.course ?? "Not added"} />
           <Info icon={KeyRound} label="Role" value="Verified User" />
         </div>
-        <div className="flex flex-wrap gap-3 border-t p-6">
+        <div className="flex flex-wrap gap-3 border-t p-4 sm:p-6">
           <Button onClick={() => toast.info("Edit profile is UI only in this prototype.")}>
             <Pencil className="mr-2 h-4 w-4" /> Edit Profile
           </Button>

@@ -6,7 +6,14 @@ import { AdminShell } from "@/components/AdminShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -40,6 +47,16 @@ function ManageCompanies() {
     loadCompanies();
   }, []);
 
+  const syncCompany = (company: ApiCompany | null, id?: string) => {
+    setCompanies((current) => {
+      if (!company) return current.filter((item) => item.id !== id);
+      const exists = current.some((item) => item.id === company.id);
+      return exists
+        ? current.map((item) => (item.id === company.id ? company : item))
+        : [company, ...current];
+    });
+  };
+
   if (loading) {
     return (
       <AdminShell>
@@ -51,16 +68,17 @@ function ManageCompanies() {
   }
 
   const handleSave = async (name: string, domain: string) => {
-    setDialog((d) => ({ ...d, open: false }));
     try {
       if (dialog.mode === "add") {
-        await api.addCompany({ name, domain, status: "Verified" });
+        const { company } = await api.addCompany({ name, domain, status: "Verified" });
+        syncCompany(company);
         toast.success(`${name} added.`);
       } else if (dialog.company) {
-        await api.updateCompany(dialog.company.id, { name, domain });
+        const { company } = await api.updateCompany(dialog.company.id, { name, domain });
+        syncCompany(company);
         toast.success(`${name} updated.`);
       }
-      loadCompanies();
+      setDialog((d) => ({ ...d, open: false }));
     } catch {
       toast.error("Failed to save company.");
     }
@@ -73,7 +91,7 @@ function ManageCompanies() {
           <Badge variant="outline" className="mb-3 border-primary/40 text-primary">
             Manage Companies
           </Badge>
-          <h1 className="text-4xl font-bold">Companies</h1>
+          <h1 className="text-3xl font-bold sm:text-4xl">Companies</h1>
         </div>
         <Dialog open={dialog.open} onOpenChange={(v) => setDialog((d) => ({ ...d, open: v }))}>
           <DialogTrigger asChild>
@@ -85,10 +103,17 @@ function ManageCompanies() {
             <DialogHeader>
               <DialogTitle>{dialog.mode === "add" ? "Add Company" : "Edit Company"}</DialogTitle>
               <DialogDescription>
-                {dialog.mode === "add" ? "Enter the company name and domain to add it to the database." : "Update the company details."}
+                {dialog.mode === "add"
+                  ? "Enter the company name and domain to add it to the database."
+                  : "Update the company details."}
               </DialogDescription>
             </DialogHeader>
-            <CompanyForm mode={dialog.mode} company={dialog.company} onSave={handleSave} onCancel={() => setDialog((d) => ({ ...d, open: false }))} />
+            <CompanyForm
+              mode={dialog.mode}
+              company={dialog.company}
+              onSave={handleSave}
+              onCancel={() => setDialog((d) => ({ ...d, open: false }))}
+            />
           </DialogContent>
         </Dialog>
       </div>
@@ -101,14 +126,14 @@ function ManageCompanies() {
           <CompanyList
             rows={companies.filter((company) => company.status === "Verified")}
             status="Verified"
-            onChange={loadCompanies}
+            onChange={syncCompany}
           />
         </TabsContent>
         <TabsContent value="blacklisted">
           <CompanyList
             rows={companies.filter((company) => company.status === "Blacklisted")}
             status="Blacklisted"
-            onChange={loadCompanies}
+            onChange={syncCompany}
           />
         </TabsContent>
       </Tabs>
@@ -170,7 +195,7 @@ function CompanyList({
 }: {
   rows: ApiCompany[];
   status: "Verified" | "Blacklisted";
-  onChange: () => void;
+  onChange: (company: ApiCompany | null, id?: string) => void;
 }) {
   const actions =
     status === "Verified" ? ["Edit", "Delete", "Blacklist"] : ["Edit", "Delete", "Verify"];
@@ -189,15 +214,16 @@ function CompanyList({
     }
 
     if (action === "Blacklist") {
-      await api.updateCompany(company.id, { status: "Blacklisted" });
+      const { company: updated } = await api.updateCompany(company.id, { status: "Blacklisted" });
+      onChange(updated);
       toast.success(`${company.name} blacklisted.`);
     } else if (action === "Verify") {
-      await api.updateCompany(company.id, { status: "Verified" });
+      const { company: updated } = await api.updateCompany(company.id, { status: "Verified" });
+      onChange(updated);
       toast.success(`${company.name} verified.`);
     } else if (action === "Edit") {
       setDialogState({ open: true, mode: "edit", company });
     }
-    onChange();
   };
 
   // Local state for the edit dialog
@@ -209,17 +235,17 @@ function CompanyList({
 
   return (
     <>
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-3">
         {rows.map((row) => (
-          <Card key={row.id} className="p-5">
+          <Card key={row.id} className="min-w-0 overflow-hidden p-4 sm:p-5">
             <div className="mb-4 flex items-start justify-between">
               <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10">
                 <Building2 className="h-5 w-5 text-primary" />
               </div>
               <Badge variant={status === "Verified" ? "outline" : "destructive"}>{status}</Badge>
             </div>
-            <h2 className="font-semibold">{row.name}</h2>
-            <p className="text-sm text-muted-foreground">{row.domain || "No domain"}</p>
+            <h2 className="break-words font-semibold">{row.name}</h2>
+            <p className="break-all text-sm text-muted-foreground">{row.domain || "No domain"}</p>
             <p className="mt-3 text-xs text-muted-foreground">Last checked: {row.last_checked}</p>
             <div className="mt-5 flex flex-wrap gap-2">
               {actions.map((action) => (
@@ -238,16 +264,23 @@ function CompanyList({
       </div>
 
       {/* Confirm dialog for delete */}
-      <Dialog open={confirmDialog.open} onOpenChange={(v) => setConfirmDialog((d) => ({ ...d, open: v }))}>
+      <Dialog
+        open={confirmDialog.open}
+        onOpenChange={(v) => setConfirmDialog((d) => ({ ...d, open: v }))}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete "{confirmDialog.company?.name}"?</DialogTitle>
             <DialogDescription>
-              This action cannot be undone. The company will be permanently removed from the database.
+              This action cannot be undone. The company will be permanently removed from the
+              database.
             </DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-2 py-4">
-            <Button variant="outline" onClick={() => setConfirmDialog((d) => ({ ...d, open: false }))}>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmDialog((d) => ({ ...d, open: false }))}
+            >
               Cancel
             </Button>
             <Button
@@ -255,8 +288,8 @@ function CompanyList({
               onClick={async () => {
                 if (confirmDialog.company) {
                   await api.deleteCompany(confirmDialog.company.id);
+                  onChange(null, confirmDialog.company.id);
                   toast.success(`${confirmDialog.company.name} deleted.`);
-                  onChange();
                 }
                 setConfirmDialog((d) => ({ ...d, open: false }));
               }}
@@ -268,7 +301,10 @@ function CompanyList({
       </Dialog>
 
       {/* Edit dialog */}
-      <Dialog open={editDialog.open} onOpenChange={(v) => setDialogState((d) => ({ ...d, open: v }))}>
+      <Dialog
+        open={editDialog.open}
+        onOpenChange={(v) => setDialogState((d) => ({ ...d, open: v }))}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Edit Company</DialogTitle>
@@ -279,9 +315,12 @@ function CompanyList({
             company={editDialog.company}
             onSave={async (name, domain) => {
               if (editDialog.company) {
-                await api.updateCompany(editDialog.company.id, { name, domain });
+                const { company: updated } = await api.updateCompany(editDialog.company.id, {
+                  name,
+                  domain,
+                });
+                onChange(updated);
                 toast.success(`${name} updated.`);
-                onChange();
               }
               setDialogState((d) => ({ ...d, open: false }));
             }}

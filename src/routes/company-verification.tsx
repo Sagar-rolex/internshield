@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Building2, CheckCircle2, Loader2, Search, ShieldAlert } from "lucide-react";
+import { Building2, CheckCircle2, Search, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,6 @@ export const Route = createFileRoute("/company-verification")({
 
 function CompanyVerification() {
   const [query, setQuery] = useState("");
-  const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [companies, setCompanies] = useState<ApiCompany[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -31,9 +30,7 @@ function CompanyVerification() {
       });
   }, []);
 
-  const matches = companies.filter((c) =>
-    c.name.toLowerCase().includes(query.toLowerCase()),
-  );
+  const matches = companies.filter((c) => c.name.toLowerCase().includes(query.toLowerCase()));
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,25 +38,21 @@ function CompanyVerification() {
       toast.error("Enter a company name to verify.");
       return;
     }
-    setLoading(true);
-    // No artificial delay - results are already loaded
-    setTimeout(() => {
-      setLoading(false);
-      setSearched(true);
-      toast.success("Company verification complete.");
-    }, 300);
+    setSearched(true);
+    toast.success("Company verification complete.");
   };
 
   return (
-    <div className="container mx-auto max-w-5xl px-4 py-12">
+    <div className="container mx-auto min-w-0 max-w-5xl px-4 py-8 sm:py-12">
       <div className="mb-10 text-center">
         <Badge variant="outline" className="mb-3 border-primary/40 text-primary">
           <Building2 className="mr-1.5 h-3 w-3" /> Company Verification
         </Badge>
-        <h1 className="text-4xl font-bold">Check a Company Before You Apply</h1>
+        <h1 className="break-words text-3xl font-bold sm:text-4xl">
+          Check a Company Before You Apply
+        </h1>
         <p className="mx-auto mt-3 max-w-xl text-muted-foreground">
-          Search verified and blacklisted company records from the ScamShield intelligence
-          database.
+          Search verified and blacklisted company records from the ScamShield intelligence database.
         </p>
       </div>
       {error && (
@@ -67,27 +60,26 @@ function CompanyVerification() {
           {error}
         </div>
       )}
-      <Card className="glass mx-auto mb-8 max-w-2xl p-5">
-        <form onSubmit={submit} className="flex gap-3">
+      <Card className="glass mx-auto mb-8 w-full max-w-2xl p-3 sm:p-5">
+        <form onSubmit={submit} className="flex min-w-0 gap-2 sm:gap-3">
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search company name..."
-            disabled={loading}
             aria-label="Search company name"
           />
-          <Button disabled={loading} className="bg-gradient-cyber">
-            {loading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Search className="h-4 w-4" />
-            )}
+          <Button
+            type="submit"
+            className="min-h-11 shrink-0 bg-gradient-cyber"
+            aria-label="Search companies"
+          >
+            <Search className="h-4 w-4" />
           </Button>
         </form>
       </Card>
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {(searched ? matches : companies).map((company) => (
-          <Card key={company.id} className="p-5">
+          <Card key={company.id} className="min-w-0 overflow-hidden p-4 sm:p-5">
             <div className="mb-4 flex items-start justify-between">
               <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10">
                 {company.status === "Verified" ? (
@@ -100,8 +92,8 @@ function CompanyVerification() {
                 {company.status}
               </Badge>
             </div>
-            <h2 className="font-semibold">{company.name}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">{company.domain}</p>
+            <h2 className="break-words font-semibold">{company.name}</h2>
+            <p className="mt-1 break-all text-sm text-muted-foreground">{company.domain}</p>
             <div className="mt-4 border-t pt-4 text-sm">
               Reports: <span className="font-mono">{company.reports}</span>
             </div>

@@ -5,10 +5,18 @@ import os
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "sqlite+aiosqlite:///./scamshield.db",
-)
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+configured_database_url = os.getenv("DATABASE_URL", "").strip()
+
+if APP_ENV == "production" and not configured_database_url:
+    raise RuntimeError("DATABASE_URL must point to the production PostgreSQL database.")
+
+DATABASE_URL = configured_database_url or "sqlite+aiosqlite:///./scamshield.db"
+
+if APP_ENV == "production" and not configured_database_url.startswith(
+    ("postgres://", "postgresql://", "postgresql+asyncpg://")
+):
+    raise RuntimeError("Production DATABASE_URL must use PostgreSQL with the asyncpg driver.")
 
 # Render (and several other managed PostgreSQL providers) supply a
 # postgresql:// URL. SQLAlchemy's async engine needs the asyncpg dialect.

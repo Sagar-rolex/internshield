@@ -49,9 +49,11 @@ function ManageUsers() {
   const updateStatus = async (user: ApiUser, status: string) => {
     if (!user.id) return;
     try {
-      await api.updateUser(user.id, { status });
+      const { user: updatedUser } = await api.updateUser(user.id, { status });
+      setUsers((current) =>
+        current.map((item) => (item.id === updatedUser.id ? { ...item, ...updatedUser } : item)),
+      );
       toast.success(`${user.name} marked ${status}.`);
-      loadUsers();
     } catch {
       toast.error(`Failed to update ${user.name}.`);
     }
@@ -62,8 +64,8 @@ function ManageUsers() {
     setDeleteTarget(null);
     try {
       await api.deleteUser(user.id);
+      setUsers((current) => current.filter((item) => item.id !== user.id));
       toast.success(`${user.name} deleted.`);
-      loadUsers();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to delete user.";
       toast.error(message);
@@ -77,7 +79,7 @@ function ManageUsers() {
           <Badge variant="outline" className="mb-3 border-primary/40 text-primary">
             Manage Users
           </Badge>
-          <h1 className="text-4xl font-bold">Users</h1>
+          <h1 className="text-3xl font-bold sm:text-4xl">Users</h1>
         </div>
         <div className="relative w-full sm:w-72">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -90,13 +92,13 @@ function ManageUsers() {
           />
         </div>
       </div>
-      <Card className="p-6">
+      <Card className="min-w-0 overflow-hidden p-3 sm:p-6">
         {loading ? (
           <div className="flex justify-center py-12">
             <Loader2 className="h-6 w-6 animate-spin text-primary" />
           </div>
         ) : (
-          <div className="min-w-0 overflow-x-auto">
+          <div className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain">
             <table className="w-full min-w-[720px] text-sm">
               <thead>
                 <tr className="border-b text-left text-xs uppercase text-muted-foreground">

@@ -42,9 +42,11 @@ function ManageReports() {
 
   const update = async (report: ApiReport, status: string) => {
     try {
-      await api.updateReport(report.id, { status });
+      const { report: updatedReport } = await api.updateReport(report.id, { status });
+      setReports((current) =>
+        current.map((item) => (item.id === updatedReport.id ? updatedReport : item)),
+      );
       toast.success(`${report.company} marked ${status}.`);
-      loadReports();
     } catch {
       toast.error(`Failed to update ${report.company}.`);
     }
@@ -54,8 +56,8 @@ function ManageReports() {
     setDeleteTarget(null);
     try {
       await api.deleteReport(report.id);
+      setReports((current) => current.filter((item) => item.id !== report.id));
       toast.success(`${report.company} report deleted.`);
-      loadReports();
     } catch {
       toast.error(`Failed to delete ${report.company}.`);
     }
@@ -67,15 +69,15 @@ function ManageReports() {
         <Badge variant="outline" className="mb-3 border-primary/40 text-primary">
           Manage Scam Reports
         </Badge>
-        <h1 className="text-4xl font-bold">Scam Reports</h1>
+        <h1 className="text-3xl font-bold sm:text-4xl">Scam Reports</h1>
       </div>
-      <Card className="p-6">
+      <Card className="min-w-0 overflow-hidden p-3 sm:p-6">
         {loading ? (
           <div className="flex justify-center py-12">
             <Loader2 className="h-6 w-6 animate-spin text-primary" />
           </div>
         ) : (
-          <div className="min-w-0 overflow-x-auto">
+          <div className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain">
             <table className="w-full min-w-[680px] text-sm">
               <thead>
                 <tr className="border-b text-left text-xs uppercase text-muted-foreground">

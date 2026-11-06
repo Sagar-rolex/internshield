@@ -9,7 +9,9 @@ export function Footer() {
           <div className="space-y-3">
             <div className="flex items-center gap-2">
               <Shield className="h-6 w-6 text-primary" />
-              <span className="font-bold text-lg">ScamShield<span className="text-gradient-cyber">.AI</span></span>
+              <span className="font-bold text-lg">
+                ScamShield<span className="text-gradient-cyber">.AI</span>
+              </span>
             </div>
             <p className="text-sm text-muted-foreground">
               AI-powered detection of fake internships and job scams to protect students.
@@ -18,10 +20,26 @@ export function Footer() {
           <div>
             <h4 className="font-semibold mb-3">Explore</h4>
             <ul className="space-y-2 text-sm text-muted-foreground">
-              <li><Link to="/detect" className="hover:text-primary">Scam Detector</Link></li>
-              <li><Link to="/dashboard" className="hover:text-primary">Dashboard</Link></li>
-              <li><Link to="/report" className="hover:text-primary">Report Scam</Link></li>
-              <li><Link to="/about" className="hover:text-primary">About Project</Link></li>
+              <li>
+                <Link to="/detect" className="hover:text-primary">
+                  Scam Detector
+                </Link>
+              </li>
+              <li>
+                <Link to="/dashboard" className="hover:text-primary">
+                  Dashboard
+                </Link>
+              </li>
+              <li>
+                <Link to="/report" className="hover:text-primary">
+                  Report Scam
+                </Link>
+              </li>
+              <li>
+                <Link to="/about" className="hover:text-primary">
+                  About Project
+                </Link>
+              </li>
             </ul>
           </div>
           <div>
@@ -48,7 +66,8 @@ export function Footer() {
           </div>
         </div>
         <div className="mt-10 pt-6 border-t border-border text-center text-xs text-muted-foreground">
-          © 2026 ScamShield.AI · Built for educational purposes · All scam detections use simulated AI models
+          © 2026 ScamShield.AI · Built for educational purposes · All scam detections use simulated
+          AI models
         </div>
       </div>
     </footer>

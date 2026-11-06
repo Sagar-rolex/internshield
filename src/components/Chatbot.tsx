@@ -1,335 +1,226 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, Loader2, MessageCircle, Send, X } from "lucide-react";
+import { Bot, Loader2, MessageCircle, RotateCcw, Send, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { api, type ChatTurn } from "@/lib/api";
 
-type Message = { role: "user" | "bot"; text: string };
+type Message = { id: string; role: "user" | "assistant"; text: string; failed?: boolean };
+type RetryRequest = { message: string; history: ChatTurn[]; errorId: string };
 
-type Intent = {
-  name: string;
-  keywords: string[];
-  answer: string;
-};
-
-const MIN_REPLY_DELAY_MS = 1500;
-
-const INTENTS: Intent[] = [
-  {
-    name: "payment-scam",
-    keywords: [
-      "fee",
-      "fees",
-      "pay",
-      "payment",
-      "deposit",
-      "registration",
-      "training fee",
-      "security amount",
-      "money",
-      "upi",
-      "refund",
-    ],
-    answer:
-      "If a company asks you to pay a registration fee, training fee, security deposit, laptop fee, or refundable amount before joining, treat it as high risk. Real employers pay candidates; they do not charge candidates to get hired. Do not pay, save screenshots, verify the company domain, and report it.",
-  },
-  {
-    name: "email-domain",
-    keywords: [
-      "email",
-      "gmail",
-      "yahoo",
-      "outlook",
-      "domain",
-      "mail",
-      "recruiter email",
-      "hr email",
-    ],
-    answer:
-      "Check whether the recruiter uses an official company domain, such as hr@company.com. Free email addresses like Gmail/Yahoo/Outlook are not always scams, but they are suspicious for formal hiring. Cross-check the email domain with the company's official website and LinkedIn page.",
-  },
-  {
-    name: "whatsapp-telegram",
-    keywords: [
-      "whatsapp",
-      "telegram",
-      "dm",
-      "chat only",
-      "message only",
-      "no interview",
-      "call only",
-    ],
-    answer:
-      "WhatsApp or Telegram-only hiring is a major warning sign, especially if there is no official email, interview process, offer letter, or company website. Ask for communication from an official company email and verify the recruiter profile before sharing documents.",
-  },
-  {
-    name: "salary",
-    keywords: [
-      "salary",
-      "stipend",
-      "ctc",
-      "package",
-      "lpa",
-      "lpm",
-      "income",
-      "earn",
-      "too good",
-      "work from home",
-    ],
-    answer:
-      "Very high salary or stipend promises for freshers, part-time work, or simple data-entry roles are risky. Compare the offer with market rates, check the role requirements, and be extra careful if the offer also asks for payment, documents, or urgent joining.",
-  },
-  {
-    name: "documents",
-    keywords: [
-      "aadhaar",
-      "pan",
-      "bank",
-      "otp",
-      "kyc",
-      "documents",
-      "passport",
-      "account number",
-      "upi pin",
-      "personal details",
-    ],
-    answer:
-      "Never share OTPs, UPI PINs, passwords, bank details, or full identity documents with an unverified recruiter. For legitimate hiring, sensitive documents are usually collected after formal selection through official HR systems, not random chat links.",
-  },
-  {
-    name: "company-verification",
-    keywords: [
-      "verify",
-      "verification",
-      "company",
-      "real company",
-      "fake company",
-      "website",
-      "linkedin",
-      "glassdoor",
-      "blacklist",
-    ],
-    answer:
-      "To verify a company, check its official website, domain age, LinkedIn page, employee profiles, office address, reviews, and whether the job exists on the company's own careers page. You can also use Company Verification in this app to compare it with verified and blacklisted records.",
-  },
-  {
-    name: "report-scam",
-    keywords: [
-      "report",
-      "complaint",
-      "submit",
-      "scam report",
-      "blacklist",
-      "fraud",
-      "fake job",
-      "fake internship",
-    ],
-    answer:
-      "Use the Report Scam page to submit the company name, recruiter contact, screenshots, source link, and what they asked you to do. Strong evidence includes payment requests, fake offer letters, suspicious links, and chat screenshots.",
-  },
-  {
-    name: "how-detector-works",
-    keywords: [
-      "how",
-      "work",
-      "detect",
-      "analysis",
-      "score",
-      "risk",
-      "ai",
-      "signals",
-      "probability",
-    ],
-    answer:
-      "The detector checks multiple scam signals: suspicious phrases, payment requests, free email domains, unrealistic salary, missing website, vague job description, WhatsApp-only communication, and company reputation. It combines those signals into a risk level and explains the red flags.",
-  },
-  {
-    name: "safe-steps",
-    keywords: [
-      "what should i do",
-      "safe",
-      "protect",
-      "avoid",
-      "next step",
-      "steps",
-      "help",
-      "advice",
-    ],
-    answer:
-      "Before applying, verify the company website, search the recruiter on LinkedIn, avoid paying any fee, do not share OTPs or banking details, compare salary with market rates, and run the job post through Analyze Job. If anything feels urgent or secretive, pause and verify first.",
-  },
+const SUGGESTIONS = [
+  "How can I identify a fake job?",
+  "What are common internship scams?",
+  "Is paying a registration fee safe?",
+  "How do I verify a company?",
+  "What does a high-risk score mean?",
+  "How do I analyze a screenshot?",
+  "How can I report a suspicious job?",
 ];
 
-const FALLBACK_ANSWER =
-  "I can help with fake internship and job scam checks. Ask about payment requests, suspicious emails, WhatsApp hiring, salary red flags, document safety, company verification, reporting scams, or how the detector works.";
-
-function normalize(text: string) {
-  return text
-    .toLowerCase()
-    .replace(/[^\w\s@.-]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function scoreIntent(query: string, intent: Intent) {
-  return intent.keywords.reduce((score, keyword) => {
-    const normalizedKeyword = normalize(keyword);
-    if (!normalizedKeyword) return score;
-    if (query === normalizedKeyword) return score + 5;
-    if (query.includes(normalizedKeyword))
-      return score + (normalizedKeyword.includes(" ") ? 4 : 2);
-    return score;
-  }, 0);
-}
-
-function generateReply(rawQuery: string) {
-  const query = normalize(rawQuery);
-  if (!query) return FALLBACK_ANSWER;
-
-  const ranked = INTENTS.map((intent) => ({ intent, score: scoreIntent(query, intent) })).sort(
-    (a, b) => b.score - a.score,
-  );
-
-  if (ranked[0]?.score > 0) return ranked[0].intent.answer;
-
-  if (query.includes("internship") || query.includes("job") || query.includes("offer")) {
-    return "For any internship or job offer, first verify the company, recruiter email, salary realism, interview process, and whether they ask for money or sensitive documents. Paste the posting into Analyze Job for a structured risk check.";
-  }
-
-  return FALLBACK_ANSWER;
-}
-
-function TypingIndicator() {
-  return (
-    <div className="flex justify-start">
-      <div className="max-w-[86%] rounded-2xl bg-muted px-3 py-3 text-sm shadow-sm">
-        <div className="mb-2 flex items-center gap-2 text-xs font-medium text-primary">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          Analyzing your question...
-        </div>
-        <div className="flex items-center gap-1">
-          <span className="h-2 w-2 animate-bounce rounded-full bg-primary/70" />
-          <span className="h-2 w-2 animate-bounce rounded-full bg-primary/70 [animation-delay:120ms]" />
-          <span className="h-2 w-2 animate-bounce rounded-full bg-primary/70 [animation-delay:240ms]" />
-          <span className="ml-2 text-xs text-muted-foreground">Checking scam signals</span>
-        </div>
-      </div>
-    </div>
-  );
-}
+const WELCOME: Message = {
+  id: "welcome",
+  role: "assistant",
+  text: "Hi! I’m the InternShield AI Assistant. Ask me about job safety, suspicious offers, or how to use InternShield.",
+};
 
 export function Chatbot() {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
+  const [messages, setMessages] = useState<Message[]>([WELCOME]);
   const [loading, setLoading] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "bot",
-      text: "Hi! I'm ShieldBot. Ask me anything about spotting fake internships and job scams.",
-    },
-  ]);
+  const [retryRequest, setRetryRequest] = useState<RetryRequest | null>(null);
+  const messagesRef = useRef(messages);
+  const busyRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
-
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const canSend = useMemo(() => input.trim().length > 0 && !loading, [input, loading]);
+
+  const updateMessages = (updater: (current: Message[]) => Message[]) => {
+    setMessages((current) => {
+      const next = updater(current);
+      messagesRef.current = next;
+      return next;
+    });
+  };
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, loading]);
 
-  // Focus input when panel opens
   useEffect(() => {
-    if (open) {
-      setTimeout(() => inputRef.current?.focus(), 100);
-    }
+    if (open) requestAnimationFrame(() => inputRef.current?.focus());
   }, [open]);
 
-  const send = async () => {
-    if (!canSend) return;
-
-    const userMsg = input.trim();
-    const startedAt = performance.now();
-    setInput("");
+  const requestReply = async (message: string, priorHistory?: ChatTurn[], retryErrorId?: string) => {
+    const text = message.trim();
+    if (!text || busyRef.current) return;
+    busyRef.current = true;
     setLoading(true);
-    setMessages((current) => [...current, { role: "user", text: userMsg }]);
 
-    const reply = generateReply(userMsg);
-    const elapsed = performance.now() - startedAt;
-    const remainingDelay = Math.max(MIN_REPLY_DELAY_MS - elapsed, 0);
+    const history = priorHistory ?? messagesRef.current
+      .filter((item) => item.id !== "welcome" && !item.failed)
+      .slice(-8)
+      .map(({ role, text: content }) => ({ role, content: content.slice(0, 1600) }));
 
-    window.setTimeout(() => {
-      setMessages((current) => [...current, { role: "bot", text: reply }]);
+    if (retryErrorId) {
+      updateMessages((current) => current.filter((item) => item.id !== retryErrorId));
+    } else {
+      updateMessages((current) => [...current, { id: crypto.randomUUID(), role: "user", text }]);
+      setInput("");
+    }
+    setRetryRequest(null);
+
+    try {
+      const response = await api.chat({ message: text, history });
+      updateMessages((current) => [
+        ...current,
+        { id: crypto.randomUUID(), role: "assistant", text: response.reply },
+      ]);
+    } catch (error) {
+      const messageError = error instanceof Error ? error.message : "The assistant is temporarily unavailable. Please retry.";
+      const status = (error as Error & { status?: number }).status;
+      const safeMessage = status === 401 ? "Your session could not be verified. Sign in again, then retry." : messageError;
+      const errorId = crypto.randomUUID();
+      updateMessages((current) => [
+        ...current,
+        { id: errorId, role: "assistant", text: safeMessage, failed: true },
+      ]);
+      setRetryRequest({ message: text, history, errorId });
+    } finally {
+      busyRef.current = false;
       setLoading(false);
-    }, remainingDelay);
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
+  };
+
+  const send = () => {
+    if (canSend) void requestReply(input);
+  };
+
+  const resetConversation = () => {
+    if (busyRef.current) return;
+    messagesRef.current = [WELCOME];
+    setMessages([WELCOME]);
+    setRetryRequest(null);
+    setInput("");
   };
 
   return (
     <>
       <button
-        onClick={() => setOpen(!open)}
-        className="fixed bottom-6 right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-cyber text-primary-foreground shadow-glow transition-transform hover:scale-110"
+        onClick={() => setOpen((current) => !current)}
+        className="fixed bottom-4 right-4 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-cyber text-primary-foreground shadow-glow transition-transform hover:scale-105 sm:bottom-6 sm:right-6"
         aria-label={open ? "Close chat" : "Open chat"}
         aria-expanded={open}
       >
         {open ? <X className="h-6 w-6" /> : <MessageCircle className="h-6 w-6" />}
       </button>
+
       {open && (
-        <div
+        <section
           role="dialog"
-          aria-label="Chat with ShieldBot"
-          className="glass fixed bottom-24 right-6 z-50 flex h-[480px] w-[340px] max-w-[calc(100vw-2rem)] animate-in flex-col rounded-2xl shadow-card fade-in slide-in-from-bottom-4"
+          aria-label="InternShield AI Assistant"
+          className="glass fixed bottom-[4.75rem] right-2 z-50 flex h-[min(70vh,560px)] w-[calc(100vw-1rem)] max-w-[380px] flex-col overflow-hidden rounded-2xl border border-border shadow-card animate-in fade-in slide-in-from-bottom-3 sm:bottom-24 sm:right-6"
         >
-          <div className="flex items-center gap-2 border-b border-border p-4">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-cyber">
-              <Bot className="h-4 w-4 text-primary-foreground" />
+          <header className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-cyber">
+              <Bot className="h-5 w-5 text-primary-foreground" />
             </div>
-            <div>
-              <div className="text-sm font-semibold">ShieldBot</div>
-              <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-success" />{" "}
-                {loading ? "Typing..." : "Online"}
-              </div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-semibold">InternShield AI Assistant</div>
+              <div className="text-xs text-muted-foreground">Job and internship safety</div>
             </div>
-          </div>
-          <div className="flex-1 space-y-3 overflow-y-auto p-4">
-            {messages.map((message, index) => (
-              <div
-                key={`${message.role}-${index}`}
-                className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
-              >
+            <Button variant="ghost" size="icon" onClick={resetConversation} disabled={loading} aria-label="Start a new conversation" title="New conversation">
+              <RotateCcw className="h-4 w-4" />
+            </Button>
+          </header>
+
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-3 sm:p-4" aria-live="polite">
+            {messages.map((message) => (
+              <div key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
                 <div
-                  className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${
-                    message.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"
+                  className={`max-w-[88%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2.5 text-sm leading-relaxed ${
+                    message.role === "user"
+                      ? "bg-primary text-primary-foreground"
+                      : message.failed
+                        ? "border border-destructive/30 bg-destructive/5 text-foreground"
+                        : "bg-muted text-foreground"
                   }`}
                 >
                   {message.text}
+                  {message.failed && retryRequest?.errorId === message.id && (
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="mt-1 block h-auto px-0 text-destructive"
+                      onClick={() => void requestReply(retryRequest.message, retryRequest.history, retryRequest.errorId)}
+                      disabled={loading}
+                    >
+                      Try again
+                    </Button>
+                  )}
                 </div>
               </div>
             ))}
-            {loading && <TypingIndicator />}
+
+            {messages.length === 1 && (
+              <div className="flex flex-wrap gap-2 pt-1">
+                {SUGGESTIONS.map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    onClick={() => void requestReply(suggestion)}
+                    disabled={loading}
+                    className="rounded-full border border-border bg-background/70 px-3 py-1.5 text-left text-xs text-foreground transition-colors hover:border-primary/50 hover:bg-primary/5 disabled:opacity-50"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {loading && (
+              <div className="flex justify-start">
+                <div className="flex items-center gap-2 rounded-2xl bg-muted px-3 py-2 text-sm text-muted-foreground" role="status">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Thinking…
+                </div>
+              </div>
+            )}
             <div ref={messagesEndRef} />
           </div>
-          <div className="flex gap-2 border-t border-border p-3">
-            <Input
+
+          <form
+            className="flex shrink-0 items-end gap-2 border-t border-border p-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              send();
+            }}
+          >
+            <Textarea
               ref={inputRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") send();
-                if (e.key === "Escape") setOpen(false);
+              onChange={(event) => setInput(event.target.value.slice(0, 1500))}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  send();
+                }
+                if (event.key === "Escape") setOpen(false);
               }}
-              placeholder={loading ? "ShieldBot is typing..." : "Ask about scams..."}
-              className="text-sm"
+              placeholder="Ask about a job offer…"
+              rows={1}
+              maxLength={1500}
               disabled={loading}
+              aria-label="Message the InternShield assistant"
+              className="max-h-28 min-h-10 resize-none py-2 text-sm"
             />
-            <Button size="icon" onClick={send} disabled={!canSend} aria-label="Send message">
-              {loading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Send className="h-4 w-4" />
-              )}
+            <Button type="submit" size="icon" disabled={!canSend} aria-label="Send message" className="h-10 w-10 shrink-0">
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             </Button>
+          </form>
+          <div className="px-3 pb-2 text-[10px] text-muted-foreground">
+            Helpful guidance, not proof that a company or job is legitimate.
           </div>
-        </div>
+        </section>
       )}
     </>
   );

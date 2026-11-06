@@ -166,7 +166,10 @@ export function DonutTrendChart({ data }: { data: DonutPoint[] }) {
         {data.map((item) => (
           <li key={item.label} className="flex items-center justify-between gap-3 text-sm">
             <span className="flex min-w-0 items-center gap-2">
-              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: item.color }} />
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-full"
+                style={{ background: item.color }}
+              />
               <span className="truncate">{item.label}</span>
             </span>
             <span className="font-medium tabular-nums">{item.value}%</span>

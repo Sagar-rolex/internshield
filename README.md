@@ -4,13 +4,13 @@ An AI-powered web app that helps students detect fake internships and job scams.
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| **Frontend** | React 19, TanStack Start (SSR) + Router + Query, Tailwind CSS v4, shadcn/ui |
-| **Backend** | Python FastAPI + SQLAlchemy (SQLite locally, PostgreSQL via asyncpg in production), scrypt password hashing, HMAC bearer tokens |
-| **Detection** | **Hybrid Engine**: 6-signal deterministic rule engine + Google Gemini AI contextual analysis |
-| **Deploy** | Vercel frontend + Render FastAPI backend |
-| **Tooling** | Vite 8, TypeScript 5.8 (strict), ESLint 9, Prettier, pytest |
+| Layer         | Technology                                                                                                                      |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| **Frontend**  | React 19, TanStack Start (SSR) + Router + Query, Tailwind CSS v4, shadcn/ui                                                     |
+| **Backend**   | Python FastAPI + SQLAlchemy (SQLite locally, PostgreSQL via asyncpg in production), scrypt password hashing, HMAC bearer tokens |
+| **Detection** | **Hybrid Engine**: 6-signal deterministic rule engine + Google Gemini AI contextual analysis                                    |
+| **Deploy**    | Vercel frontend + Render FastAPI backend                                                                                        |
+| **Tooling**   | Vite 7, TypeScript 5.8 (strict), ESLint 9, Prettier, pytest                                                                     |
 
 ## Prerequisites
 
@@ -42,42 +42,42 @@ npm run backend
 npm run dev
 ```
 
-Open **http://localhost:5173**.
+Open **http://localhost:3000**.
 
-Interactive API docs: http://127.0.0.1:4000/docs
+Interactive API docs: http://127.0.0.1:4001/docs
 
 ## Demo Accounts
 
 Seeded automatically on the first backend start.
 
-| Role | Email | Password |
-|---|---|---|
-| Admin (local demo only) | `admin@internshield.com` | `admin123` |
-| User (local demo only) | `student@internshield.com` | `student123` |
+| Role                    | Email                      | Password     |
+| ----------------------- | -------------------------- | ------------ |
+| Admin (local demo only) | `admin@internshield.com`   | `admin123`   |
+| User (local demo only)  | `student@internshield.com` | `student123` |
 
 These demo accounts are seeded only when `SEED_DEMO_DATA` is enabled (the local default). The Render deployment disables demo seeding and provisions the administrator from private `ADMIN_EMAIL` and `ADMIN_PASSWORD` environment variables.
 
 ## Scripts
 
-| Command | Purpose |
-|---|---|
-| `npm run dev` | Start Vite dev server (frontend) |
-| `npm run backend` | Start Python FastAPI server (port 4000) |
-| `npm run build` | Production build for Vercel |
-| `npm run preview` | Preview production build |
-| `npm run lint` | ESLint |
-| `npm run format` | Prettier |
+| Command           | Purpose                                 |
+| ----------------- | --------------------------------------- |
+| `npm run dev`     | Start Vite dev server (frontend)        |
+| `npm run backend` | Start Python FastAPI server (port 4001) |
+| `npm run build`   | Production build for Vercel             |
+| `npm run preview` | Preview production build                |
+| `npm run lint`    | ESLint                                  |
+| `npm run format`  | Prettier                                |
 
 ## Environment Variables (optional)
 
-| Variable | Where | Default |
-|---|---|---|
-| `VITE_API_URL` | frontend build environment | Local: `http://127.0.0.1:4000/api`; production fallback: `https://internshield-backend.onrender.com/api` |
-| `DATABASE_URL` | backend | Local: `sqlite+aiosqlite:///./scamshield.db`; production: PostgreSQL URL |
-| `SESSION_SECRET` | backend | `dev-secret-change-me` (**set a strong value in prod**) |
-| `CORS_ORIGIN` | backend | Local Vite origins; production must list the exact frontend origin(s), comma-separated |
-| `GEMINI_API_KEY` | backend | Optional; rule based analysis still works without it |
-| `OCR_BACKEND` | backend | `auto` (auto \| tesseract \| demo) |
+| Variable         | Where                      | Default                                                                                                  |
+| ---------------- | -------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `VITE_API_URL`   | frontend build environment | Local: `http://127.0.0.1:4001/api`; production fallback: `https://internshield-backend.onrender.com/api` |
+| `DATABASE_URL`   | backend                    | Local: `sqlite+aiosqlite:///./scamshield.db`; production: PostgreSQL URL                                 |
+| `SESSION_SECRET` | backend                    | `dev-secret-change-me` (**set a strong value in prod**)                                                  |
+| `CORS_ORIGIN`    | backend                    | Local Vite origins; production must list the exact frontend origin(s), comma-separated                   |
+| `GEMINI_API_KEY` | backend                    | Optional; rule based analysis still works without it                                                     |
+| `OCR_BACKEND`    | backend                    | `auto` (auto \| tesseract \| demo)                                                                       |
 
 `auto` uses Tesseract when available and returns a clear service error if it is missing. It never substitutes sample OCR text. `demo` is an explicit development/test setting only.
 
@@ -164,13 +164,14 @@ vite.config.ts              Vercel/Nitro build configuration
 
 ### Hybrid Engine Scoring
 
-| Component | Weight | Range | Notes |
-|---|---|---|---|
-| Rule Engine | 70% | 0–98 | Deterministic, authoritative for patterns |
-| Gemini AI | 30% | 0–100 | Contextual, supplements rules |
-| **Final Score** | — | 0–100 | `round(0.7 × rule + 0.3 × ai)` |
+| Component       | Weight | Range | Notes                                     |
+| --------------- | ------ | ----- | ----------------------------------------- |
+| Rule Engine     | 70%    | 0–98  | Deterministic, authoritative for patterns |
+| Gemini AI       | 30%    | 0–100 | Contextual, supplements rules             |
+| **Final Score** | —      | 0–100 | `round(0.7 × rule + 0.3 × ai)`            |
 
 **Risk Levels:**
+
 - **Low** (0–29): Generally legitimate
 - **Medium** (30–59): Notable concerns, proceed with caution
 - **High** (60–100): Strong scam indicators
