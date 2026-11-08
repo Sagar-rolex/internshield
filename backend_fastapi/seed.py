@@ -3,6 +3,7 @@ Seed the database with demo users, reports, and companies.
 Run once: python -m backend_fastapi.seed
 """
 import asyncio
+import logging
 import os
 import uuid
 from datetime import datetime
@@ -43,37 +44,65 @@ COMPANIES = [
 
 async def seed():
     async with AsyncSessionLocal() as db:
+        app_env = os.getenv("APP_ENV", "development").strip().lower()
+        demo_data_enabled = os.getenv(
+            "SEED_DEMO_DATA", "false" if app_env == "production" else "true"
+        ).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+
+        # Production admin provisioning is independent of demo seeding and of
+        # whether the database already contains users. Never update an existing
+        # account or silently elevate a user account based on environment data.
+        if app_env == "production":
+            admin_email = os.getenv("ADMIN_EMAIL", "").strip().lower()
+            admin_password = os.getenv("ADMIN_PASSWORD", "")
+            if bool(admin_email) != bool(admin_password):
+                raise RuntimeError("Set both ADMIN_EMAIL and ADMIN_PASSWORD to provision the production administrator.")
+            if admin_email and admin_password:
+                existing_admin = (
+                    await db.execute(select(User).where(User.email == admin_email))
+                ).scalar_one_or_none()
+                if existing_admin is None:
+                    db.add(
+                        User(
+                            id=_uuid(),
+                            name="InternShield Admin",
+                            email=admin_email,
+                            password_hash=hash_password(admin_password),
+                            role="admin",
+                            status="Active",
+                        )
+                    )
+                    await db.commit()
+                    logging.getLogger("scamshield").info(
+                        "Provisioned configured production administrator."
+                    )
+                elif existing_admin.role != "admin":
+                    logging.getLogger("scamshield").error(
+                        "Configured ADMIN_EMAIL matches a non-admin account; no account was changed."
+                    )
+                else:
+                    logging.getLogger("scamshield").info(
+                        "Configured production administrator already exists; credentials and role were left unchanged."
+                    )
+
+            if demo_data_enabled:
+                logging.getLogger("scamshield").warning(
+                    "Ignoring SEED_DEMO_DATA=true in production; demo accounts are never seeded."
+                )
+            return
+
         count = (await db.execute(select(func.count(User.id)))).scalar()
         if count and count > 0:
             print("Database already seeded — skipping.")
             return
 
-        demo_data_enabled = os.getenv("SEED_DEMO_DATA", "true").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-        }
         if not demo_data_enabled:
-            # Public deployments must never receive the documented demo
-            # passwords. An administrator can be provisioned once using
-            # deployment secrets instead.
-            admin_email = os.getenv("ADMIN_EMAIL", "").strip().lower()
-            admin_password = os.getenv("ADMIN_PASSWORD", "")
-            if admin_email and admin_password:
-                db.add(
-                    User(
-                        id=_uuid(),
-                        name="InternShield Admin",
-                        email=admin_email,
-                        password_hash=hash_password(admin_password),
-                        role="admin",
-                        status="Active",
-                    )
-                )
-                await db.commit()
-                print("Seeded production administrator from environment.")
-            else:
-                print("Demo seeding disabled; no administrator credentials configured.")
+            # Explicitly disabled local/demo seeding is useful for test databases.
+            print("Demo seeding disabled.")
             return
 
         for u in USERS:

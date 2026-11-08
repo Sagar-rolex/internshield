@@ -6,6 +6,8 @@ services:
     dockerContext: .
     plan: free
     envVars:
+      - key: APP_ENV
+        value: production
       - key: CORS_ORIGIN
         sync: false
       - key: DATABASE_URL

@@ -16,6 +16,7 @@ from fastapi import FastAPI, Depends, HTTPException, Request, Response, UploadFi
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import case, select, update, delete, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .database import engine, get_db, Base
@@ -275,7 +276,28 @@ async def register(body: RegisterInput, request: Request, db: AsyncSession = Dep
         status="Active",
     )
     db.add(user)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        # A concurrent request may have registered the email after the
+        # availability check. Convert the unique-index race into a safe 409.
+        existing = (
+            await db.execute(select(User.id).where(User.email == email))
+        ).scalar_one_or_none()
+        if existing:
+            raise HTTPException(409, "An account with that email already exists.") from exc
+        logging.getLogger("scamshield").error(
+            "Registration transaction failed due to a database integrity error (type=%s).",
+            type(exc).__name__,
+        )
+        raise HTTPException(503, "Registration could not be completed. Please try again later.") from exc
+    except Exception as exc:
+        await db.rollback()
+        logging.getLogger("scamshield").error(
+            "Registration database transaction failed (type=%s).", type(exc).__name__
+        )
+        raise HTTPException(503, "Registration could not be completed. Please try again later.") from exc
     await db.refresh(user)
     return auth_response(user)
 
