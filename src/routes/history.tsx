@@ -225,7 +225,9 @@ function AnalysisDetail({ analysis }: { analysis: AnalysisResult }) {
         <div className="rounded-lg bg-muted p-3 text-center">
           <div className="text-xs text-muted-foreground">Risk Level</div>
           <Badge
-            variant={analysis.risk === "High" || analysis.risk === "Critical" ? "destructive" : "secondary"}
+            variant={
+              analysis.risk === "High" || analysis.risk === "Critical" ? "destructive" : "secondary"
+            }
             className={
               analysis.risk === "Low"
                 ? "bg-success/15 text-success"

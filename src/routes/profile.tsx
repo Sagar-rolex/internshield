@@ -23,7 +23,7 @@ function Profile() {
   const { user, logout } = useAuth();
   return (
     <div className="container mx-auto min-w-0 max-w-4xl px-4 py-8 sm:py-12">
-      <Card className="glass overflow-hidden shadow-card">
+      <Card className="overflow-hidden shadow-card">
         <div className="bg-gradient-hero p-5 text-primary-foreground sm:p-8">
           <Avatar className="h-24 w-24 border-4 border-white/30">
             <AvatarFallback className="bg-white/20 text-2xl text-white">

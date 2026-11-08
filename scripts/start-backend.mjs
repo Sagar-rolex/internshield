@@ -5,11 +5,19 @@ import { fileURLToPath } from "node:url";
 
 const projectRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const windows = process.platform === "win32";
+const activePython = process.env.VIRTUAL_ENV
+  ? resolve(process.env.VIRTUAL_ENV, windows ? "Scripts/python.exe" : "bin/python")
+  : null;
 const candidates = windows
-  ? [".venv/Scripts/python.exe", "venv/Scripts/python.exe"]
-  : [".venv/bin/python", "venv/bin/python"];
-const python = candidates.map((candidate) => resolve(projectRoot, candidate)).find(existsSync);
+  ? [activePython, ".venv/Scripts/python.exe", "venv/Scripts/python.exe"]
+  : [activePython, ".venv/bin/python", "venv/bin/python"];
+const python = candidates
+  .filter((candidate) => candidate !== null)
+  .map((candidate) => resolve(projectRoot, candidate))
+  .find(existsSync);
 const executable = python ?? (windows ? "python" : "python3");
+
+console.log(`Starting FastAPI with ${executable}`);
 
 const child = spawn(
   executable,

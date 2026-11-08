@@ -51,22 +51,27 @@ export function Chatbot() {
     if (open) requestAnimationFrame(() => inputRef.current?.focus());
   }, [open]);
 
-  const requestReply = async (message: string, priorHistory?: ChatTurn[], retryErrorId?: string) => {
+  const requestReply = async (
+    message: string,
+    priorHistory?: ChatTurn[],
+    retryErrorId?: string,
+  ) => {
     const text = message.trim();
     if (!text || busyRef.current) return;
     busyRef.current = true;
     setLoading(true);
 
-    const history = priorHistory ?? messagesRef.current
-      .filter((item) => item.id !== "welcome" && !item.failed)
-      .slice(-8)
-      .map(({ role, text: content }) => ({ role, content: content.slice(0, 1600) }));
+    const history =
+      priorHistory ??
+      messagesRef.current
+        .filter((item) => item.id !== "welcome" && !item.failed)
+        .slice(-8)
+        .map(({ role, text: content }) => ({ role, content: content.slice(0, 1600) }));
 
     if (retryErrorId) {
       updateMessages((current) => current.filter((item) => item.id !== retryErrorId));
     } else {
       updateMessages((current) => [...current, { id: crypto.randomUUID(), role: "user", text }]);
-      setInput("");
     }
     setRetryRequest(null);
 
@@ -76,15 +81,23 @@ export function Chatbot() {
         ...current,
         { id: crypto.randomUUID(), role: "assistant", text: response.reply },
       ]);
+      setInput((current) => (current === text ? "" : current));
     } catch (error) {
-      const messageError = error instanceof Error ? error.message : "The assistant is temporarily unavailable. Please retry.";
+      const messageError =
+        error instanceof Error
+          ? error.message
+          : "The assistant is temporarily unavailable. Please retry.";
       const status = (error as Error & { status?: number }).status;
-      const safeMessage = status === 401 ? "Your session could not be verified. Sign in again, then retry." : messageError;
+      const safeMessage =
+        status === 401
+          ? "Your session could not be verified. Sign in again, then retry."
+          : messageError;
       const errorId = crypto.randomUUID();
       updateMessages((current) => [
         ...current,
         { id: errorId, role: "assistant", text: safeMessage, failed: true },
       ]);
+      setInput((current) => (current ? current : text));
       setRetryRequest({ message: text, history, errorId });
     } finally {
       busyRef.current = false;
@@ -130,14 +143,27 @@ export function Chatbot() {
               <div className="truncate text-sm font-semibold">InternShield AI Assistant</div>
               <div className="text-xs text-muted-foreground">Job and internship safety</div>
             </div>
-            <Button variant="ghost" size="icon" onClick={resetConversation} disabled={loading} aria-label="Start a new conversation" title="New conversation">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={resetConversation}
+              disabled={loading}
+              aria-label="Start a new conversation"
+              title="New conversation"
+            >
               <RotateCcw className="h-4 w-4" />
             </Button>
           </header>
 
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-3 sm:p-4" aria-live="polite">
+          <div
+            className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-3 sm:p-4"
+            aria-live="polite"
+          >
             {messages.map((message) => (
-              <div key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div
+                key={message.id}
+                className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
+              >
                 <div
                   className={`max-w-[88%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2.5 text-sm leading-relaxed ${
                     message.role === "user"
@@ -153,7 +179,13 @@ export function Chatbot() {
                       variant="link"
                       size="sm"
                       className="mt-1 block h-auto px-0 text-destructive"
-                      onClick={() => void requestReply(retryRequest.message, retryRequest.history, retryRequest.errorId)}
+                      onClick={() =>
+                        void requestReply(
+                          retryRequest.message,
+                          retryRequest.history,
+                          retryRequest.errorId,
+                        )
+                      }
                       disabled={loading}
                     >
                       Try again
@@ -180,7 +212,10 @@ export function Chatbot() {
 
             {loading && (
               <div className="flex justify-start">
-                <div className="flex items-center gap-2 rounded-2xl bg-muted px-3 py-2 text-sm text-muted-foreground" role="status">
+                <div
+                  className="flex items-center gap-2 rounded-2xl bg-muted px-3 py-2 text-sm text-muted-foreground"
+                  role="status"
+                >
                   <Loader2 className="h-4 w-4 animate-spin" /> Thinking…
                 </div>
               </div>
@@ -213,8 +248,18 @@ export function Chatbot() {
               aria-label="Message the InternShield assistant"
               className="max-h-28 min-h-10 resize-none py-2 text-sm"
             />
-            <Button type="submit" size="icon" disabled={!canSend} aria-label="Send message" className="h-10 w-10 shrink-0">
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            <Button
+              type="submit"
+              size="icon"
+              disabled={!canSend}
+              aria-label="Send message"
+              className="h-10 w-10 shrink-0"
+            >
+              {loading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
             </Button>
           </form>
           <div className="px-3 pb-2 text-[10px] text-muted-foreground">

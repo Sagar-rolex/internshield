@@ -77,7 +77,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       throw new Error("The assistant took too long to respond. Please retry.");
     }
     throw new Error(
-      "Could not reach the analysis service. Check your network and API configuration, then retry.",
+      "Could not reach the backend service. Check your connection and API configuration, then retry.",
     );
   }
 
@@ -130,6 +130,16 @@ export type ApiCompany = {
   status: "Verified" | "Blacklisted";
   reports: number;
   last_checked: string;
+};
+
+export type UserDashboardResponse = {
+  stats: {
+    jobsAnalyzed: number;
+    reportsSubmitted: number;
+    savedResults: number;
+    companyChecks: number;
+  };
+  recentAnalyses: AnalysisResult[];
 };
 
 // ── API surface ───────────────────────────────────────────────────────────
@@ -206,6 +216,8 @@ export const api = {
     }),
 
   // Analysis
+  dashboard: (signal?: AbortSignal) => request<UserDashboardResponse>("/dashboard", { signal }),
+
   analyzeManual: (input: {
     title: string;
     company: string;
@@ -238,7 +250,7 @@ export const api = {
     request<ChatResponse>("/chat", {
       method: "POST",
       body: JSON.stringify(input),
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(70_000),
     }),
 };
 

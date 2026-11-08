@@ -1,6 +1,6 @@
 # Chatbot Audit
 
-## Existing workflow inspected
+## Historical audit (before the AI-chat implementation)
 
 - UI: `src/components/Chatbot.tsx`.
 - Frontend API client: `src/lib/api.ts`.
@@ -20,7 +20,7 @@
 7. **Privacy baseline is favorable but untested.** No chat DB means there are no cross-user chat rows to leak. The intended AI path must require authentication, use the authenticated user's analysis history only when specifically requested, avoid logging message contents, and treat pasted advertisements as untrusted input.
 8. **Configuration/security.** The existing provider key is read by the backend from `GEMINI_API_KEY`; there is no frontend provider key. `render.yaml` marks the variable as backend-only and unsynchronized. The adapter currently imports deprecated `google.generativeai` and initializes `gemini-1.5-flash`; provider failures are converted to analysis fallbacks for the analysis route, but there is no chatbot-specific failure handling.
 
-## Root cause
+## Original feature root cause
 
 The current feature is a deterministic FAQ keyword switcher, not an AI assistant. Its limited intent vocabulary, overlapping generic keywords, latest-turn-only matching, and canned responses explain irrelevant, generic, and context-free answers. This implementation cannot explain a user's actual analysis because it has neither an analysis context API nor a model request path.
 
@@ -31,3 +31,5 @@ Add a rate-limited `/api/chat` endpoint using the existing Gemini provider crede
 ## Implementation status
 
 The local keyword matcher was replaced with the backend AI flow. Gemini calls now use Google's current `google-genai` SDK (async on active API paths); the old `google.generativeai` dependency was removed and the unused stale main helper was deleted. The API returns 503/502/504-safe responses on configuration/provider/timeout failures, validates message/history sizes, applies per-user or guest-IP limits, and does not store or log chat bodies. A signed-in user's recent analysis is retrieved only when the current message explicitly asks for it and is filtered by that user's ID. UI and test details are in `CHATBOT_TEST_REPORT.md`.
+
+For the follow-up operational configuration issue (local dotenv loading, missing local SDK installation, and Render secret setup), see `CHATBOT_ROOT_CAUSE.md` and `CHATBOT_FIX_REPORT.md`.

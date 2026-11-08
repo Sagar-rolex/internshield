@@ -68,7 +68,6 @@ def analyze_with_gemini(text: str) -> AIAnalysisOutput:
                 config=types.GenerateContentConfig(
                     system_instruction=_SYSTEM_PROMPT,
                     response_mime_type="application/json",
-                    temperature=0.2,
                     max_output_tokens=1000,
                 ),
             )

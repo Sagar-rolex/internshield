@@ -1,4 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
 import {
   Activity,
   Building2,
@@ -13,34 +15,11 @@ import { ProtectedRoute, useAuth } from "@/components/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { api } from "@/lib/api";
 
 export const Route = createFileRoute("/dashboard")({
   component: DashboardRoute,
 });
-
-const stats = [
-  { label: "Jobs Analyzed", value: "34", icon: Activity, tone: "bg-primary/10 text-primary" },
-  {
-    label: "Scam Reports Submitted",
-    value: "8",
-    icon: FileWarning,
-    tone: "bg-destructive/10 text-destructive",
-  },
-  { label: "Saved Results", value: "12", icon: Save, tone: "bg-accent/10 text-accent" },
-  {
-    label: "Verified Companies Checked",
-    value: "19",
-    icon: Building2,
-    tone: "bg-success/10 text-success",
-  },
-];
-
-const recent = [
-  { date: "12 Jul 2026", company: "TechNova Labs", risk: "Low", status: "Saved" },
-  { date: "11 Jul 2026", company: "FastCash Hiring", risk: "High", status: "Reported" },
-  { date: "09 Jul 2026", company: "BrightCareer Hub", risk: "Medium", status: "Reviewed" },
-  { date: "07 Jul 2026", company: "CampusEdge AI", risk: "Low", status: "Verified" },
-];
 
 function DashboardRoute() {
   return (
@@ -52,6 +31,45 @@ function DashboardRoute() {
 
 function Dashboard() {
   const { user } = useAuth();
+  const dashboardQuery = useQuery({
+    queryKey: ["user-dashboard", user?.id],
+    queryFn: ({ signal }) => api.dashboard(signal),
+    enabled: Boolean(user?.id),
+    staleTime: 0,
+  });
+  const stats = useMemo(() => {
+    const values = dashboardQuery.data?.stats;
+    const displayValue = (value: number | undefined) =>
+      dashboardQuery.isPending ? "…" : dashboardQuery.isError ? "—" : String(value ?? 0);
+    return [
+      {
+        label: "Jobs Analyzed",
+        value: displayValue(values?.jobsAnalyzed),
+        icon: Activity,
+        tone: "bg-primary/10 text-primary",
+      },
+      {
+        label: "Scam Reports Submitted",
+        value: displayValue(values?.reportsSubmitted),
+        icon: FileWarning,
+        tone: "bg-destructive/10 text-destructive",
+      },
+      {
+        label: "Saved Results",
+        value: displayValue(values?.savedResults),
+        icon: Save,
+        tone: "bg-accent/10 text-accent",
+      },
+      {
+        label: "Verified Companies Checked",
+        value: displayValue(values?.companyChecks),
+        icon: Building2,
+        tone: "bg-success/10 text-success",
+      },
+    ];
+  }, [dashboardQuery.data, dashboardQuery.isError, dashboardQuery.isPending]);
+  const recent = dashboardQuery.data?.recentAnalyses ?? [];
+
   return (
     <div className="container mx-auto min-w-0 px-4 py-8 sm:py-12">
       <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
@@ -107,6 +125,11 @@ function Dashboard() {
 
       <Card className="min-w-0 overflow-hidden p-3 sm:p-6">
         <h2 className="mb-4 text-lg font-semibold">Recent Analysis</h2>
+        {dashboardQuery.isError && (
+          <p className="mb-3 text-sm text-destructive" role="alert">
+            Your dashboard data could not be loaded. Please refresh and try again.
+          </p>
+        )}
         <div className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain">
           <table className="w-full min-w-[560px] text-sm">
             <thead>
@@ -118,16 +141,36 @@ function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {recent.map((row) => (
-                <tr key={`${row.date}-${row.company}`} className="border-b border-border/50">
-                  <td className="px-2 py-3">{row.date}</td>
-                  <td className="px-2 py-3 font-medium">{row.company}</td>
-                  <td className="px-2 py-3">
-                    <Risk risk={row.risk} />
+              {dashboardQuery.isPending ? (
+                <tr>
+                  <td className="px-2 py-6 text-center text-muted-foreground" colSpan={4}>
+                    Loading your activity…
                   </td>
-                  <td className="px-2 py-3 text-right text-muted-foreground">{row.status}</td>
                 </tr>
-              ))}
+              ) : recent.length === 0 && !dashboardQuery.isError ? (
+                <tr>
+                  <td className="px-2 py-6 text-center text-muted-foreground" colSpan={4}>
+                    No analyses yet. Analyze a job to see your activity here.
+                  </td>
+                </tr>
+              ) : (
+                recent.map((analysis) => (
+                  <tr key={analysis.id} className="border-b border-border/50">
+                    <td className="px-2 py-3">
+                      {new Date(analysis.created_at).toLocaleDateString()}
+                    </td>
+                    <td className="px-2 py-3 font-medium">
+                      {analysis.company || analysis.job_title || "Untitled job"}
+                    </td>
+                    <td className="px-2 py-3">
+                      <Risk risk={analysis.risk} />
+                    </td>
+                    <td className="px-2 py-3 text-right text-muted-foreground">
+                      {analysis.safe ? "Safe" : "Review"}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

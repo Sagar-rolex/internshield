@@ -16,10 +16,14 @@ pip install -r backend_fastapi/requirements.txt
 # 3. Make sure PostgreSQL is running and a 'scamshield' database exists
 createdb scamshield
 
-# 4. Set environment variables (optional — defaults shown)
+# 4. Set backend environment variables (Render injects these in production;
+#    local development reads .env.local first, then .env, without overriding
+#    values already exported by the shell)
 export DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/scamshield
 export SESSION_SECRET=dev-secret-change-me
 export CORS_ORIGIN=http://localhost:5173
+export GEMINI_API_KEY=your_backend_only_gemini_key
+export GEMINI_MODEL=gemini-3.8-flash
 
 # 5. Start the server
 uvicorn backend_fastapi.main:app --host 127.0.0.1 --port 4001 --reload
@@ -40,8 +44,8 @@ Open http://127.0.0.1:4001/docs for the interactive Swagger UI.
 | `DATABASE_URL` | `postgresql+asyncpg://postgres:postgres@localhost:5432/scamshield` | PostgreSQL connection string |
 | `SESSION_SECRET` | `dev-secret-change-me` | HMAC signing key — set a strong value in production |
 | `CORS_ORIGIN` | `http://localhost:5173` | Comma-separated allowed origins |
-| `GEMINI_API_KEY` | *required for AI/chat layer* | Google Gemini API key; set only on the backend |
-| `GEMINI_MODEL` | `gemini-3.8-flash` | Optional Gemini model name override |
+| `GEMINI_API_KEY` | Required for chat | Google Gemini API key; set only in the backend environment |
+| `GEMINI_MODEL` | `gemini-3.8-flash` | Optional Google model ID override |
 | `OCR_BACKEND` | `auto` | `auto` \| `tesseract` \| `demo` — OCR engine selection |
 
 ## Demo Accounts

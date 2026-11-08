@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { Navigate, useLocation } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
+import { Navigate, useLocation, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { Loader2, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -61,16 +62,19 @@ function safeParseUser(raw: string | null): AuthUser | null {
 
 /** Persist both user object and bearer token together. */
 function persistSession(next: AuthUser | null, token: string | null) {
-  if (next) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    if (token) setToken(token);
-  } else {
-    localStorage.removeItem(STORAGE_KEY);
-    setToken(null);
+  try {
+    if (next) localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    else localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // Keep the in-memory session usable when browser storage is unavailable.
   }
+  if (next && token) setToken(token);
+  if (!next) setToken(null);
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -88,21 +92,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (e.key !== STORAGE_KEY) {
         // Also handle token key
         if (e.key === "scamshield.auth.token") {
-          if (e.newValue === null) setUser(null);
+          if (e.newValue === null) {
+            queryClient.clear();
+            setUser(null);
+          }
         }
         return;
       }
+      queryClient.clear();
       setUser(safeParseUser(localStorage.getItem(STORAGE_KEY)));
     };
     window.addEventListener("storage", handler);
     return () => window.removeEventListener("storage", handler);
-  }, []);
+  }, [queryClient]);
 
-  const persist = useCallback((next: AuthUser | null, token: string | null = null) => {
-    setUser(next);
-    if (typeof window === "undefined") return;
-    persistSession(next, token);
-  }, []);
+  const persist = useCallback(
+    (next: AuthUser | null, token: string | null = null) => {
+      // Drop responses cached under the previous account before changing tokens.
+      queryClient.clear();
+      setUser(next);
+      if (typeof window === "undefined") return;
+      persistSession(next, token);
+    },
+    [queryClient],
+  );
 
   const loginInFlight = useRef(false);
 
@@ -180,8 +193,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(() => {
     persist(null);
+    // Explicitly leave the protected route as soon as local credentials are cleared.
+    // This avoids depending on a nested protected-layout redirect to finish logout.
+    void navigate({ to: "/", replace: true });
     toast.info("You have been logged out.");
-  }, [persist]);
+  }, [navigate, persist]);
 
   const valueMemo: AuthContextValue = {
     user,

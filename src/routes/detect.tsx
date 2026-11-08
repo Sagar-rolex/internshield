@@ -892,7 +892,9 @@ function ResultView({
                 >
                   {s.triggered ? "●" : "○"} {s.name}
                 </span>
-                <span className="font-mono">{s.triggered ? `+${s.contribution ?? s.weight}` : "0"}</span>
+                <span className="font-mono">
+                  {s.triggered ? `+${s.contribution ?? s.weight}` : "0"}
+                </span>
                 {s.triggered && s.evidence && (
                   <span className="ml-3 text-muted-foreground">“{s.evidence}”</span>
                 )}
@@ -907,7 +909,9 @@ function ResultView({
           <h3 className="font-semibold mb-2 text-sm">Unverified information</h3>
           <ul className="space-y-1">
             {result.uncertainties.map((item, index) => (
-              <li key={index} className="text-sm text-muted-foreground">{item}</li>
+              <li key={index} className="text-sm text-muted-foreground">
+                {item}
+              </li>
             ))}
           </ul>
         </Card>

@@ -1,25 +1,40 @@
 # Chatbot Test Report
 
-## Automated checks
+## Automated backend tests
 
-- Chatbot unit suite: 7 passed. Covers history ordering/bounds, prompt-injection boundary, explicit personal-analysis intent, missing provider configuration, input validation, rate limiting, and FastAPI route registration.
-- Existing detector regression tests: 8 passed; screenshot OCR tests: 8 passed.
-- Python compile check: passed.
-- FastAPI app import and `/api/chat` registration: passed.
-- TypeScript check (`npx tsc --noEmit`): passed.
-- Production client/server build (`npm run build`): passed.
+Command:
 
-## Coverage limits
+```powershell
+.\.venv\Scripts\python.exe -m unittest backend_fastapi.tests.test_chatbot -v
+```
 
-- No live Gemini call was made. The local virtual environment does not have `google-genai` installed, and no production API key was available. Docker deployment installs the updated requirement.
-- A transport-level `TestClient` request was not run because this environment's Starlette TestClient requires the missing `httpx2` package. Route registration, request validation, rate limit behavior, and missing-key handling in the provider adapter were checked directly; HTTP 502/503/504 mappings were not exercised end to end.
-- The chatbot's history is intentionally not persisted. Refresh clears it; each request includes only the most recent eight prior messages.
-- The in-memory rate limiter is process-local. Deployments with multiple replicas need a shared rate-limit store.
+Result: **27 tests passed** (mocked Gemini provider; no API credentials printed).
 
-## Required manual smoke test after deployment
+Coverage includes greeting and safety question request construction, follow-up history, eight-turn history bounds and role mapping, authorized own-analysis data isolation, invalid/missing API key handling, unsupported model handling, local and provider rate limits, distinguishing project daily quota from short-term 429 rate limits, bounded 429/503 retries, provider 504 retry cap, network error classification, no retry for invalid credentials or exhausted project quota, task cancellation and client-disconnect cancellation, SDK hidden retries disabled, safe backend error messages, and environment loading.
 
-1. Ask “How can I identify a fake internship?” and follow up “What if they promise a refund?”; confirm the follow-up uses conversation context.
-2. Ask a new question with Reset; confirm the old conversation is not sent.
-3. Ask a general InternShield feature question and a question about the signed-in user's latest analysis.
-4. Temporarily unset/invalid-test the backend provider key in a non-production environment; confirm a clear retryable error appears and no canned answer is shown.
-5. Test mobile width, Enter-to-send, Shift+Enter, loading state, duplicate-send prevention, and retry.
+These mocked tests validate application behavior but do not assert the truth or quality of a live Gemini answer.
+
+## Live integration check
+
+A minimal greeting was sent to the configured model with the local backend key present. The key was not displayed or logged. `gemini-3.8-flash` returned HTTP 503 on all three bounded attempts; durations were 8.5 s, 4.8 s, and 9.2 s, with 26.4 s total. The live request therefore **failed** because Gemini was temporarily unavailable/overloaded. No successful live answer is claimed.
+
+The model name is listed as stable by Google's current model page, and the official SDK documents `models.generate_content` using `gemini-3.8-flash`. This verifies model support, not account-specific quota/access or moment-to-moment provider availability.
+
+## Frontend verification
+
+- `npm run build`: passed (client and SSR production bundles built).
+- `npm run lint`: passed with 0 errors and 11 existing warnings. `src/components/Chatbot.tsx` passes targeted ESLint. Warnings are in unrelated existing components/utilities.
+- `src/routes/detect.tsx` and `src/routes/history.tsx` received formatting-only changes to resolve three project-wide Prettier lint errors.
+- Python `py_compile` passed for the changed backend service, route, and test modules.
+- No browser automation test was run for Retry-button interaction; the component behavior was reviewed and the production build passed.
+
+## Not verified
+
+- Production Render environment variables, live Render logs, and production database access are not available from this workspace.
+- No successful live answer was returned. The Gemini request and account's current access/availability remain unverified beyond the observed 503s.
+- No API key was rotated. The provider's 503 response does not establish that a new key is needed.
+
+## References
+
+- [Gemini API error codes](https://ai.google.dev/gemini-api/docs/api-errors)
+- [Gemini 3.8 Flash model page](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash)

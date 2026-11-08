@@ -36,12 +36,25 @@ class AIValidationOutput:
 class GeminiUnavailableError(RuntimeError):
     """The Gemini SDK or server-side API key is unavailable."""
 
+    def __init__(self, message: str, code: str):
+        super().__init__(message)
+        self.code = code
+
 
 class GeminiAnalysisError(RuntimeError):
     """A provider response could not be used safely."""
-    def __init__(self, message: str, fallback_result: Optional[AIValidationOutput] = None):
+
+    def __init__(
+        self,
+        message: str,
+        fallback_result: Optional[AIValidationOutput] = None,
+        code: str = "provider_error",
+        retry_after_seconds: int | None = None,
+    ):
         super().__init__(message)
         self.fallback_result = fallback_result
+        self.code = code
+        self.retry_after_seconds = retry_after_seconds
 
 
 ANALYSIS_PROMPT = """
@@ -54,20 +67,118 @@ unsupported_findings, additional_context, missing_information, recommendations, 
 """.strip()
 
 
-def _new_client():
+def _new_client(
+    timeout_ms: int = PROVIDER_TIMEOUT_MS,
+    max_http_attempts: int | None = None,
+):
     if not GENAI_AVAILABLE:
-        raise GeminiUnavailableError("Gemini SDK is not installed on the backend.")
+        raise GeminiUnavailableError(
+            "Gemini SDK is not installed on the backend.", code="sdk_missing"
+        )
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
-        raise GeminiUnavailableError("Gemini is not configured on the backend.")
-    return genai.Client(
-        api_key=api_key,
-        http_options=types.HttpOptions(timeout=PROVIDER_TIMEOUT_MS),
-    )
+        raise GeminiUnavailableError(
+            "GEMINI_API_KEY is not set on the backend.", code="api_key_missing"
+        )
+    http_options = {"timeout": timeout_ms}
+    if max_http_attempts is not None:
+        # Keep chat retries under application control instead of stacking the
+        # SDK's own retry loop on top of the bounded chatbot retry policy.
+        http_options["retry_options"] = types.HttpRetryOptions(
+            attempts=max(1, max_http_attempts),
+            initial_delay=0.5,
+            max_delay=2.0,
+            exp_base=2.0,
+            jitter=0.5,
+            http_status_codes=[408, 429, 500, 502, 503, 504],
+        )
+    return genai.Client(api_key=api_key, http_options=types.HttpOptions(**http_options))
 
 
 def _model_name() -> str:
     return os.getenv("GEMINI_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
+
+
+def provider_configuration_status() -> dict[str, object]:
+    """Return safe diagnostics only; never return or log the key itself."""
+    return {
+        "sdk_available": GENAI_AVAILABLE,
+        "api_key_configured": bool(os.getenv("GEMINI_API_KEY", "").strip()),
+        "model": _model_name(),
+    }
+
+
+def classify_provider_error(error: Exception) -> str:
+    """Classify SDK failures using status metadata without retaining provider text."""
+    status = getattr(error, "code", None)
+    if not isinstance(status, int):
+        status = getattr(error, "status_code", None)
+    if not isinstance(status, int):
+        status = getattr(error, "http_status", None)
+    if isinstance(status, str) and status.isdigit():
+        status = int(status)
+
+    # Google may report an invalid key as HTTP 400 instead of 401/403.
+    description = " ".join(
+        str(value)
+        for value in (
+            getattr(error, "status", ""),
+            getattr(error, "code", ""),
+            getattr(error, "message", ""),
+            str(error),
+        )
+    ).lower()
+    if status in (401, 403) or any(
+        marker in description
+        for marker in ("api_key_invalid", "api key not valid", "invalid api key")
+    ):
+        return "invalid_api_key"
+    if status == 429:
+        if any(
+            marker in description
+            for marker in (
+                "quota_exceeded",
+                "quota exceeded",
+                "daily quota",
+                "per day",
+                "per_day",
+                "requests per day",
+                "requestsperday",
+                "tokensperday",
+                "spend cap",
+                "spend limit",
+                "billing limit",
+                "prepay balance",
+            )
+        ):
+            return "provider_quota_exceeded"
+        return "provider_rate_limited"
+    if status in (404, 410) or "model not found" in description:
+        return "model_unavailable"
+    if (
+        status in (408, 504)
+        or isinstance(error, TimeoutError)
+        or "timeout" in type(error).__name__.lower()
+        or any(marker in description for marker in ("timed out", "deadline_exceeded", "deadline exceeded"))
+    ):
+        return "provider_timeout"
+    if status in (500, 502, 503) or any(
+        marker in description
+        for marker in (
+            "500 internal server error",
+            "502 bad gateway",
+            "503",
+            "service unavailable",
+            "service_unavailable",
+            "temporarily overloaded",
+            "deadline_exceeded",
+        )
+    ):
+        return "provider_unavailable"
+    error_type = type(error).__name__.lower()
+    if any(marker in error_type for marker in ("connection", "connecterror", "network")):
+        return "network_error"
+    return "provider_error"
 
 
 def _response_text(response) -> str:
@@ -99,7 +210,6 @@ async def validate_with_gemini(
                 config=types.GenerateContentConfig(
                     system_instruction=ANALYSIS_PROMPT,
                     response_mime_type="application/json",
-                    temperature=0.2,
                     max_output_tokens=1000,
                 ),
             )

@@ -4,6 +4,7 @@ Exact same API contract: same endpoints, same JSON shapes.
 """
 import os
 import asyncio
+import logging
 import time
 import uuid
 import json
@@ -44,6 +45,8 @@ from .services.gemini_service import (
     validate_with_gemini,
     GeminiUnavailableError,
     GeminiAnalysisError,
+    provider_configuration_status,
+    _model_name,
 )
 from .services.risk_aggregator import aggregate_evidence_and_ai
 from .services.chat_service import generate_chat_reply, wants_personal_analysis
@@ -121,6 +124,19 @@ def _rate_key(request: Request, path: str, is_auth: bool = False) -> str:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    provider_status = provider_configuration_status()
+    if not provider_status["sdk_available"]:
+        logging.getLogger("scamshield").error(
+            "Chatbot unavailable: google-genai dependency is not installed."
+        )
+    elif not provider_status["api_key_configured"]:
+        logging.getLogger("scamshield").error(
+            "Chatbot unavailable: GEMINI_API_KEY is not configured in the backend environment."
+        )
+    else:
+        logging.getLogger("scamshield").info(
+            "Chatbot provider configured; model=%s", provider_status["model"]
+        )
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     await seed()
@@ -1091,6 +1107,40 @@ async def list_analyses(
     return {"analyses": [_analysis_to_dict(r) for r in rows]}
 
 
+class ChatClientDisconnected(Exception):
+    """The browser disconnected while a Gemini request was still running."""
+
+
+async def _chat_reply_or_disconnect(
+    request: Request,
+    message: str,
+    history: list[dict],
+    analysis_context: dict | None,
+) -> str:
+    """Cancel provider work when the client leaves instead of wasting retries."""
+    provider_task = asyncio.create_task(
+        generate_chat_reply(message, history, analysis_context)
+    )
+    try:
+        while not provider_task.done():
+            if await request.is_disconnected():
+                provider_task.cancel()
+                try:
+                    await provider_task
+                except asyncio.CancelledError:
+                    pass
+                raise ChatClientDisconnected()
+            await asyncio.wait({provider_task}, timeout=0.25)
+        return provider_task.result()
+    finally:
+        if not provider_task.done():
+            provider_task.cancel()
+            try:
+                await provider_task
+            except asyncio.CancelledError:
+                pass
+
+
 @app.post("/api/chat")
 async def chat(
     body: ChatInput,
@@ -1131,14 +1181,70 @@ async def chat(
 
     try:
         reply = await asyncio.wait_for(
-            generate_chat_reply(body.message, history, analysis_context), timeout=26.0
+            _chat_reply_or_disconnect(request, body.message, history, analysis_context),
+            timeout=65.0,
         )
+    except ChatClientDisconnected:
+        logging.getLogger("scamshield").info("Chat request cancelled after client disconnect.")
+        raise HTTPException(499, "Client disconnected.")
     except GeminiUnavailableError:
-        raise HTTPException(503, "The AI assistant is not configured right now. Please try again later.")
+        config_status = provider_configuration_status()
+        if not config_status["sdk_available"]:
+            logging.getLogger("scamshield").error(
+                "Chatbot request unavailable: SDK dependency missing (google-genai)."
+            )
+            raise HTTPException(
+                503,
+                "The AI assistant dependency is missing on the backend. Redeploy the backend dependencies.",
+            )
+        logging.getLogger("scamshield").error(
+            "Chatbot request unavailable: GEMINI_API_KEY is missing."
+        )
+        raise HTTPException(
+            503,
+            "The AI assistant is not configured on the backend. Set GEMINI_API_KEY in the backend environment.",
+        )
     except asyncio.TimeoutError:
         raise HTTPException(504, "The assistant took too long to respond. Please retry.")
     except GeminiAnalysisError as exc:
-        logging.getLogger("scamshield").warning("Chat generation failed (%s)", type(exc).__name__)
+        logger = logging.getLogger("scamshield")
+        logger.warning("Chat provider failure category=%s", exc.code)
+        if exc.code == "invalid_api_key":
+            raise HTTPException(
+                503,
+                "Gemini rejected the backend API key. Verify GEMINI_API_KEY in the backend environment.",
+            )
+        if exc.code == "provider_quota_exceeded":
+            raise HTTPException(
+                429,
+                "The Gemini project quota or spending limit appears exhausted. Check Google AI Studio Usage and Rate Limits; changing the API key will not reset project limits.",
+            )
+        if exc.code == "provider_rate_limited":
+            retry_after = exc.retry_after_seconds or 30
+            raise HTTPException(
+                429,
+                "Gemini's short-term request limit was reached. Wait, then retry. If it continues, check the project's AI Studio Rate Limits and Usage.",
+                headers={"Retry-After": str(retry_after)},
+            )
+        if exc.code == "provider_unavailable":
+            raise HTTPException(
+                503,
+                "Gemini is temporarily overloaded or unavailable. Please wait a few seconds and retry.",
+                headers={"Retry-After": "5"},
+            )
+        if exc.code == "network_error":
+            raise HTTPException(
+                503,
+                "The backend could not reach Gemini after several attempts. Check the backend network and retry.",
+                headers={"Retry-After": "5"},
+            )
+        if exc.code == "model_unavailable":
+            raise HTTPException(
+                503,
+                "The configured Gemini model is unavailable. Verify GEMINI_MODEL on the backend.",
+            )
+        if exc.code == "provider_timeout":
+            raise HTTPException(504, "Gemini took too long to respond. Please retry.")
         raise HTTPException(502, "The assistant could not create a reliable response. Please retry.")
     except Exception as exc:
         logging.getLogger("scamshield").error("Chat request failed (%s)", type(exc).__name__)
@@ -1146,7 +1252,7 @@ async def chat(
 
     return {
         "reply": reply,
-        "model": os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
+        "model": _model_name(),
         "analysis_context_used": analysis_context is not None,
     }
 
@@ -1172,6 +1278,9 @@ async def user_dashboard(
             select(func.count(CompanyVerification.id)).where(CompanyVerification.user_id == user.id)
         )
     ).scalar() or 0
+    # Analyses are automatically persisted to the user's History; the current
+    # schema has no separate saved/unsaved state, so these are the saved results.
+    saved_results_count = analyses_count
     recent_rows = (
         await db.execute(
             select(Analysis)
@@ -1184,6 +1293,7 @@ async def user_dashboard(
         "stats": {
             "jobsAnalyzed": analyses_count,
             "reportsSubmitted": reports_count,
+            "savedResults": saved_results_count,
             "companyChecks": verifications_count,
         },
         "recentAnalyses": [_analysis_to_dict(row) for row in recent_rows],
