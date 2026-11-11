@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { api, type ApiCompany } from "@/lib/api";
+import { api, isRequestAborted, type ApiCompany } from "@/lib/api";
 
 export const Route = createFileRoute("/company-verification")({
   component: CompanyVerification,
@@ -25,8 +25,10 @@ function CompanyVerification() {
       .then((data) => {
         setCompanies(data.companies);
       })
-      .catch(() => {
-        setError("Backend unavailable — start it with `npm run backend`.");
+      .catch((requestError: unknown) => {
+        if (!isRequestAborted(requestError)) {
+          setError("Backend unavailable — start it with `npm run backend`.");
+        }
       });
   }, []);
 

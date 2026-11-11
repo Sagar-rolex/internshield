@@ -12,6 +12,22 @@ const defaultApiUrl = import.meta.env.DEV
 const API_URL = (configuredApiUrl || defaultApiUrl).replace(/\/+$/, "");
 
 const AUTH_KEY = "scamshield.auth.token";
+const authenticatedRequests = new Set<AbortController>();
+
+/** Stop in-flight requests made with the current session token. */
+export function cancelAuthenticatedRequests() {
+  for (const controller of authenticatedRequests) controller.abort();
+  authenticatedRequests.clear();
+}
+
+export function isRequestAborted(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    (error as { name?: unknown }).name === "AbortError"
+  );
+}
 
 // ── Token management (bearer token stored in localStorage) ────────────────
 // NOTE: In production, httpOnly cookies are preferred. localStorage tokens
@@ -53,8 +69,14 @@ function errorMessage(data: ApiError, status: number): string {
   return `Request failed (${status}). Please check the request and try again.`;
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+async function request<T>(
+  path: string,
+  options: RequestInit = {},
+  trackAuthenticatedRequest = true,
+): Promise<T> {
   const token = getToken();
+  const sessionController = token && trackAuthenticatedRequest ? new AbortController() : null;
+  if (sessionController) authenticatedRequests.add(sessionController);
   const isForm = options.body instanceof FormData;
   const headers: Record<string, string> = isForm
     ? { ...((options.headers as Record<string, string>) ?? {}) }
@@ -64,46 +86,55 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  let response: Response;
   try {
-    response = await fetch(`${API_URL}${path}`, {
-      ...options,
-      headers,
-      // Authentication uses the Authorization bearer token; cookies are not used by this API.
-      credentials: "omit",
-    });
-  } catch (error) {
-    if (error instanceof Error && error.name === "TimeoutError") {
-      throw new Error("The assistant took too long to respond. Please retry.");
+    let response: Response;
+    try {
+      response = await fetch(`${API_URL}${path}`, {
+        ...options,
+        headers,
+        signal:
+          sessionController && options.signal
+            ? AbortSignal.any([sessionController.signal, options.signal])
+            : (sessionController?.signal ?? options.signal),
+        // Authentication uses the Authorization bearer token; cookies are not used by this API.
+        credentials: "omit",
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw error;
+      if (error instanceof Error && error.name === "TimeoutError") {
+        throw new Error("The assistant took too long to respond. Please retry.");
+      }
+      throw new Error(
+        "Could not reach the backend service. Check your connection and API configuration, then retry.",
+      );
     }
-    throw new Error(
-      "Could not reach the backend service. Check your connection and API configuration, then retry.",
-    );
-  }
 
-  // Handle empty-body responses (e.g. 204)
-  if (response.status === 204) return undefined as T;
+    // Handle empty-body responses (e.g. 204)
+    if (response.status === 204) return undefined as T;
 
-  // Attempt to parse the body as JSON regardless of status code — the server
-  // always returns structured JSON even on errors.
-  let data: T & ApiError;
-  try {
-    data = (await response.json()) as T & ApiError;
-  } catch {
-    if (!response.ok && response.status >= 500) {
-      throw new Error("The service could not complete the request. Please try again.");
+    // Attempt to parse the body as JSON regardless of status code — the server
+    // always returns structured JSON even on errors.
+    let data: T & ApiError;
+    try {
+      data = (await response.json()) as T & ApiError;
+    } catch {
+      if (!response.ok && response.status >= 500) {
+        throw new Error("The service could not complete the request. Please try again.");
+      }
+      throw new Error("The service returned an unreadable response. Please try again.");
     }
-    throw new Error("The service returned an unreadable response. Please try again.");
-  }
 
-  if (!response.ok) {
-    const message = errorMessage(data, response.status);
-    const err = new Error(message) as Error & { status: number };
-    err.status = response.status;
-    throw err;
-  }
+    if (!response.ok) {
+      const message = errorMessage(data, response.status);
+      const err = new Error(message) as Error & { status: number };
+      err.status = response.status;
+      throw err;
+    }
 
-  return data;
+    return data;
+  } finally {
+    if (sessionController) authenticatedRequests.delete(sessionController);
+  }
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -111,6 +142,27 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 export type ApiUser = AuthUser & {
   id: string;
   status?: string;
+  created_at?: string;
+};
+
+export type PaginatedUsersResponse = {
+  users: ApiUser[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+};
+
+export type AdminUserDetail = {
+  user: ApiUser;
+  stats: { analyses: number; reports: number; companyChecks: number };
+  recentAnalyses: Array<{
+    id: string;
+    job_title: string;
+    company: string;
+    risk: string;
+    created_at: string;
+  }>;
 };
 
 export type ApiReport = {
@@ -142,10 +194,77 @@ export type UserDashboardResponse = {
   recentAnalyses: AnalysisResult[];
 };
 
+export type AdminAnalyticsResponse = {
+  period: string;
+  dateRange: { from: string | null; to: string | null };
+  granularity: "hour" | "day" | "week" | "month";
+  cards: {
+    totalUsers: number;
+    activeUsers: number;
+    inactiveUsers: number;
+    reviewUsers: number;
+    newUsers: number;
+    jobsAnalyzed: number;
+    scamsDetected: number;
+    highRiskDetections: number;
+    mediumRiskDetections: number;
+    lowRiskDetections: number;
+    totalReports: number;
+    reportsPending: number;
+    verifiedCompanies: number;
+    totalCompanies: number;
+    companyChecks: number;
+    detectionRate: number;
+  };
+  monthly: Array<{
+    bucket: string;
+    label: string;
+    jobs: number;
+    scams: number;
+    registrations: number;
+    reports: number;
+  }>;
+  riskDistribution: Array<{ risk: string; count: number }>;
+  scamCategories: Array<{ category: string; count: number }>;
+  reportStatusDistribution: Array<{ status: string; count: number }>;
+  companyStatusDistribution: Array<{ status: string; count: number }>;
+  topCompanies: Array<{ company: string; reports: number }>;
+  recentUsers: ApiUser[];
+  recentReports: ApiReport[];
+  recentCompanies: ApiCompany[];
+  recentAnalyses: Array<{
+    id: string;
+    job_title: string;
+    company: string;
+    risk: string;
+    probability: number;
+    created_at: string;
+  }>;
+  recentAdminActions: Array<{
+    id: string;
+    actor: string;
+    action: string;
+    entity_type: string;
+    entity_id: string;
+    summary: string;
+    created_at: string;
+  }>;
+};
+
 // ── API surface ───────────────────────────────────────────────────────────
 
 export const api = {
   // Auth
+  logout: () =>
+    request<{ ok: boolean }>(
+      "/auth/logout",
+      {
+        method: "POST",
+        signal: AbortSignal.timeout(4000),
+      },
+      false,
+    ),
+
   login: (email: string, password: string) =>
     request<{ user: ApiUser; token: string }>("/auth/login", {
       method: "POST",
@@ -165,9 +284,30 @@ export const api = {
     }),
 
   // Users (admin)
-  users: () => request<{ users: ApiUser[] }>("/admin/users"),
+  users: (
+    filters: {
+      q?: string;
+      status?: string;
+      role?: string;
+      date_from?: string;
+      date_to?: string;
+      sort_by?: string;
+      sort_order?: string;
+      page?: number;
+      page_size?: number;
+    } = {},
+  ) => {
+    const query = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== "") query.set(key, String(value));
+    });
+    const suffix = query.toString();
+    return request<PaginatedUsersResponse>(`/admin/users${suffix ? `?${suffix}` : ""}`);
+  },
 
-  updateUser: (id: string, input: { name?: string; status?: string }) =>
+  adminUser: (id: string) => request<AdminUserDetail>(`/admin/users/${encodeURIComponent(id)}`),
+
+  updateUser: (id: string, input: { name?: string; status?: string; role?: "user" | "admin" }) =>
     request<{ user: ApiUser }>(`/admin/users/${encodeURIComponent(id)}`, {
       method: "PATCH",
       body: JSON.stringify(input),
@@ -179,7 +319,28 @@ export const api = {
     }),
 
   // Reports
-  reports: () => request<{ reports: ApiReport[] }>("/reports"),
+  reports: (
+    filters: {
+      q?: string;
+      status?: string;
+      risk_level?: string;
+      page?: number;
+      page_size?: number;
+    } = {},
+  ) => {
+    const query = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== "") query.set(key, String(value));
+    });
+    const suffix = query.toString();
+    return request<{
+      reports: ApiReport[];
+      total: number;
+      page: number;
+      page_size: number;
+      total_pages: number;
+    }>(`/reports${suffix ? `?${suffix}` : ""}`);
+  },
 
   updateReport: (id: string, input: { status?: string; riskLevel?: string }) =>
     request<{ report: ApiReport }>(`/reports/${encodeURIComponent(id)}`, {
@@ -193,7 +354,20 @@ export const api = {
     }),
 
   // Companies
-  companies: () => request<{ companies: ApiCompany[] }>("/companies"),
+  companies: (filters: { q?: string; status?: string; page?: number; page_size?: number } = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== "") query.set(key, String(value));
+    });
+    const suffix = query.toString();
+    return request<{
+      companies: ApiCompany[];
+      total: number;
+      page: number;
+      page_size: number;
+      total_pages: number;
+    }>(`/companies${suffix ? `?${suffix}` : ""}`);
+  },
 
   addCompany: (input: { name: string; domain?: string; status?: string }) =>
     request<{ company: ApiCompany }>("/companies", {
@@ -246,12 +420,49 @@ export const api = {
   },
 
   analyses: () => request<{ analyses: AnalysisResult[] }>("/analyses"),
+  analysisImage: (id: string) =>
+    request<{ url: string }>(`/analyses/${encodeURIComponent(id)}/image`),
+
+  deleteAnalysisImage: (id: string) =>
+    request<{ ok: boolean }>(`/analyses/${encodeURIComponent(id)}/image`, {
+      method: "DELETE",
+    }),
+
   chat: (input: ChatInput) =>
     request<ChatResponse>("/chat", {
       method: "POST",
       body: JSON.stringify(input),
       signal: AbortSignal.timeout(70_000),
     }),
+
+  analytics: (period = "all", dateFrom?: string, dateTo?: string) => {
+    const query = new URLSearchParams({ period });
+    if (dateFrom) query.set("date_from", dateFrom);
+    if (dateTo) query.set("date_to", dateTo);
+    return request<AdminAnalyticsResponse>(`/analytics?${query.toString()}`);
+  },
+
+  exportAnalytics: async (period = "all", dateFrom?: string, dateTo?: string) => {
+    const query = new URLSearchParams({ period });
+    if (dateFrom) query.set("date_from", dateFrom);
+    if (dateTo) query.set("date_to", dateTo);
+    const token = getToken();
+    const response = await fetch(`${API_URL}/admin/analytics.csv?${query.toString()}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      credentials: "omit",
+    });
+    if (!response.ok) {
+      let message = "Analytics export failed.";
+      try {
+        const body = (await response.json()) as ApiError;
+        message = errorMessage(body, response.status);
+      } catch {
+        // Retain the safe fallback if the backend did not return JSON.
+      }
+      throw new Error(message);
+    }
+    return response.blob();
+  },
 };
 
 // ── Analysis Types ───────────────────────────────────────────────────────────
@@ -295,6 +506,7 @@ export type AnalysisResult = {
   website: string;
   description: string;
   image_path: string;
+  has_image: boolean;
   extracted_text: string;
   probability: number;
   risk: "Low" | "Medium" | "High" | "Critical";

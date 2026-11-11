@@ -170,6 +170,34 @@
   .animate-gradient { animation: none; }
 }
 
+/* Floating support chat: keep the page visible and respect mobile safe areas. */
+.support-chat-toggle {
+  right: calc(16px + env(safe-area-inset-right, 0px));
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+}
+
+.support-chat-window {
+  box-sizing: border-box;
+  right: calc(16px + env(safe-area-inset-right, 0px));
+  bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+  width: min(380px, calc(100vw - 32px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
+  height: min(520px, calc(100dvh - 120px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)));
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 120px);
+}
+
+@media (min-width: 641px) {
+  .support-chat-toggle {
+    right: 24px;
+    bottom: 24px;
+  }
+
+  .support-chat-window {
+    right: 24px;
+    bottom: 96px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after {

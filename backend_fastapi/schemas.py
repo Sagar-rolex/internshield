@@ -39,6 +39,7 @@ class AuthResponse(BaseModel):
 class UpdateUserInput(BaseModel):
     name: str | None = None
     status: str | None = None
+    role: str | None = None
 
 
 # ── Reports ───────────────────────────────────────────────────────────────────

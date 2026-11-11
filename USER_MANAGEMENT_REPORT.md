@@ -1,0 +1,5 @@
+# User Management Report
+
+The admin user API supports search by name/email, role/status/date filters, validated sorting, and page/page-size metadata (maximum 100 rows per page). The table shows registration time and provides a detail view with account statistics and the five latest analyses. Admins can change a user's role after confirmation; only an authenticated admin can call that endpoint and the last active admin cannot be demoted or deactivated. User deletion removes linked report ownership, company-check rows, analyses, and screenshot references; it then attempts to remove associated ImageKit files. An external asset cleanup failure is logged without exposing credentials. Admin accounts cannot be deleted.
+
+The current model has no last-login timestamp or separate saved-results table; last login is not shown, and saved analyses are represented by analysis records. Existing account records are not changed by this implementation. Verify role/status values against the API contract before operating on a real database.

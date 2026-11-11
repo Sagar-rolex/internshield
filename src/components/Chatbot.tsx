@@ -3,6 +3,7 @@ import { Bot, Loader2, MessageCircle, RotateCcw, Send, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { api, type ChatTurn } from "@/lib/api";
+import { AUTH_SESSION_CHANGE_EVENT } from "@/lib/auth-events";
 
 type Message = { id: string; role: "user" | "assistant"; text: string; failed?: boolean };
 type RetryRequest = { message: string; history: ChatTurn[]; errorId: string };
@@ -31,6 +32,7 @@ export function Chatbot() {
   const [retryRequest, setRetryRequest] = useState<RetryRequest | null>(null);
   const messagesRef = useRef(messages);
   const busyRef = useRef(false);
+  const requestGenerationRef = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const canSend = useMemo(() => input.trim().length > 0 && !loading, [input, loading]);
@@ -48,7 +50,26 @@ export function Chatbot() {
   }, [messages, loading]);
 
   useEffect(() => {
-    if (open) requestAnimationFrame(() => inputRef.current?.focus());
+    const clearSessionConversation = () => {
+      requestGenerationRef.current += 1;
+      busyRef.current = false;
+      messagesRef.current = [WELCOME];
+      setMessages([WELCOME]);
+      setRetryRequest(null);
+      setInput("");
+      setLoading(false);
+      setOpen(false);
+    };
+    window.addEventListener(AUTH_SESSION_CHANGE_EVENT, clearSessionConversation);
+    return () => window.removeEventListener(AUTH_SESSION_CHANGE_EVENT, clearSessionConversation);
+  }, []);
+
+  useEffect(() => {
+    // Avoid opening the mobile keyboard as soon as the floating panel appears.
+    // Desktop users can start typing immediately without changing the layout.
+    if (open && window.matchMedia("(hover: hover) and (pointer: fine)").matches) {
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
   }, [open]);
 
   const requestReply = async (
@@ -60,6 +81,7 @@ export function Chatbot() {
     if (!text || busyRef.current) return;
     busyRef.current = true;
     setLoading(true);
+    const requestGeneration = requestGenerationRef.current;
 
     const history =
       priorHistory ??
@@ -77,12 +99,14 @@ export function Chatbot() {
 
     try {
       const response = await api.chat({ message: text, history });
+      if (requestGeneration !== requestGenerationRef.current) return;
       updateMessages((current) => [
         ...current,
         { id: crypto.randomUUID(), role: "assistant", text: response.reply },
       ]);
       setInput((current) => (current === text ? "" : current));
     } catch (error) {
+      if (requestGeneration !== requestGenerationRef.current) return;
       const messageError =
         error instanceof Error
           ? error.message
@@ -100,9 +124,11 @@ export function Chatbot() {
       setInput((current) => (current ? current : text));
       setRetryRequest({ message: text, history, errorId });
     } finally {
-      busyRef.current = false;
-      setLoading(false);
-      requestAnimationFrame(() => inputRef.current?.focus());
+      if (requestGeneration === requestGenerationRef.current) {
+        busyRef.current = false;
+        setLoading(false);
+        requestAnimationFrame(() => inputRef.current?.focus());
+      }
     }
   };
 
@@ -122,7 +148,7 @@ export function Chatbot() {
     <>
       <button
         onClick={() => setOpen((current) => !current)}
-        className="fixed bottom-4 right-4 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-cyber text-primary-foreground shadow-glow transition-transform hover:scale-105 sm:bottom-6 sm:right-6"
+        className="support-chat-toggle fixed z-[1000] flex h-14 w-14 items-center justify-center rounded-full bg-gradient-cyber text-primary-foreground shadow-glow transition-transform hover:scale-105"
         aria-label={open ? "Close chat" : "Open chat"}
         aria-expanded={open}
       >
@@ -133,7 +159,7 @@ export function Chatbot() {
         <section
           role="dialog"
           aria-label="InternShield AI Assistant"
-          className="glass fixed bottom-[4.75rem] right-2 z-50 flex h-[min(70vh,560px)] w-[calc(100vw-1rem)] max-w-[380px] flex-col overflow-hidden rounded-2xl border border-border shadow-card animate-in fade-in slide-in-from-bottom-3 sm:bottom-24 sm:right-6"
+          className="support-chat-window glass fixed z-[1000] flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border shadow-card animate-in fade-in slide-in-from-bottom-3"
         >
           <header className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-cyber">
@@ -156,7 +182,7 @@ export function Chatbot() {
           </header>
 
           <div
-            className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-3 sm:p-4"
+            className="min-h-0 min-w-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto overscroll-contain p-3 sm:p-4"
             aria-live="polite"
           >
             {messages.map((message) => (
@@ -165,7 +191,7 @@ export function Chatbot() {
                 className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
               >
                 <div
-                  className={`max-w-[88%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2.5 text-sm leading-relaxed ${
+                  className={`max-w-[88%] whitespace-pre-wrap [overflow-wrap:anywhere] rounded-2xl px-3 py-2.5 text-sm leading-relaxed ${
                     message.role === "user"
                       ? "bg-primary text-primary-foreground"
                       : message.failed
@@ -223,47 +249,49 @@ export function Chatbot() {
             <div ref={messagesEndRef} />
           </div>
 
-          <form
-            className="flex shrink-0 items-end gap-2 border-t border-border p-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              send();
-            }}
-          >
-            <Textarea
-              ref={inputRef}
-              value={input}
-              onChange={(event) => setInput(event.target.value.slice(0, 1500))}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  send();
-                }
-                if (event.key === "Escape") setOpen(false);
+          <div className="shrink-0 border-t border-border">
+            <form
+              className="flex items-end gap-2 p-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                send();
               }}
-              placeholder="Ask about a job offer…"
-              rows={1}
-              maxLength={1500}
-              disabled={loading}
-              aria-label="Message the InternShield assistant"
-              className="max-h-28 min-h-10 resize-none py-2 text-sm"
-            />
-            <Button
-              type="submit"
-              size="icon"
-              disabled={!canSend}
-              aria-label="Send message"
-              className="h-10 w-10 shrink-0"
             >
-              {loading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Send className="h-4 w-4" />
-              )}
-            </Button>
-          </form>
-          <div className="px-3 pb-2 text-[10px] text-muted-foreground">
-            Helpful guidance, not proof that a company or job is legitimate.
+              <Textarea
+                ref={inputRef}
+                value={input}
+                onChange={(event) => setInput(event.target.value.slice(0, 1500))}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    send();
+                  }
+                  if (event.key === "Escape") setOpen(false);
+                }}
+                placeholder="Ask about a job offer…"
+                rows={1}
+                maxLength={1500}
+                disabled={loading}
+                aria-label="Message the InternShield assistant"
+                className="max-h-28 min-h-10 resize-none py-2 text-sm"
+              />
+              <Button
+                type="submit"
+                size="icon"
+                disabled={!canSend}
+                aria-label="Send message"
+                className="h-10 w-10 shrink-0"
+              >
+                {loading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+              </Button>
+            </form>
+            <div className="px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] text-[10px] text-muted-foreground">
+              Helpful guidance, not proof that a company or job is legitimate.
+            </div>
           </div>
         </section>
       )}

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Building2, Loader2, Plus } from "lucide-react";
+import { Building2, Loader2, Plus, Search } from "lucide-react";
 import { toast } from "sonner";
 import { AdminShell } from "@/components/AdminShell";
 import { Badge } from "@/components/ui/badge";
@@ -17,7 +17,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { api, type ApiCompany } from "@/lib/api";
+import { api, isRequestAborted, type ApiCompany } from "@/lib/api";
 
 export const Route = createFileRoute("/admin/companies")({
   component: ManageCompanies,
@@ -26,26 +26,48 @@ export const Route = createFileRoute("/admin/companies")({
 function ManageCompanies() {
   const [companies, setCompanies] = useState<ApiCompany[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState<"Verified" | "Blacklisted">("Verified");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [reload, setReload] = useState(0);
   const [dialog, setDialog] = useState<{
     open: boolean;
     mode: "add" | "edit";
     company: ApiCompany | null;
   }>({ open: false, mode: "add", company: null });
 
-  const loadCompanies = async () => {
-    try {
-      const data = await api.companies();
-      setCompanies(data.companies);
-    } catch {
-      toast.error("Backend unavailable — start it with `npm run backend`.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    loadCompanies();
-  }, []);
+    let cancelled = false;
+    const timer = window.setTimeout(
+      () => {
+        setLoading(true);
+        setError(null);
+        api
+          .companies({ q: query.trim(), status, page, page_size: 25 })
+          .then((data) => {
+            if (cancelled) return;
+            setCompanies(data.companies);
+            setTotal(data.total);
+            setTotalPages(data.total_pages);
+          })
+          .catch((reason: unknown) => {
+            if (!cancelled && !isRequestAborted(reason))
+              setError(reason instanceof Error ? reason.message : "Could not load companies.");
+          })
+          .finally(() => {
+            if (!cancelled) setLoading(false);
+          });
+      },
+      query.trim() ? 250 : 0,
+    );
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [page, query, reload, status]);
 
   const syncCompany = (company: ApiCompany | null, id?: string) => {
     setCompanies((current) => {
@@ -55,6 +77,7 @@ function ManageCompanies() {
         ? current.map((item) => (item.id === company.id ? company : item))
         : [company, ...current];
     });
+    setReload((value) => value + 1);
   };
 
   if (loading) {
@@ -79,7 +102,8 @@ function ManageCompanies() {
         toast.success(`${name} updated.`);
       }
       setDialog((d) => ({ ...d, open: false }));
-    } catch {
+    } catch (error) {
+      if (isRequestAborted(error)) return;
       toast.error("Failed to save company.");
     }
   };
@@ -92,7 +116,24 @@ function ManageCompanies() {
             Manage Companies
           </Badge>
           <h1 className="text-3xl font-bold sm:text-4xl">Companies</h1>
+          <p className="mt-2 max-w-xl text-sm text-muted-foreground">
+            Statuses describe records maintained on this platform; they are not independent
+            verification of a company.
+          </p>
         </div>
+        <label className="relative w-full sm:w-72">
+          <span className="sr-only">Search companies</span>
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setPage(1);
+            }}
+            placeholder="Search name or domain"
+            className="pl-9"
+          />
+        </label>
         <Dialog open={dialog.open} onOpenChange={(v) => setDialog((d) => ({ ...d, open: v }))}>
           <DialogTrigger asChild>
             <Button>
@@ -117,26 +158,62 @@ function ManageCompanies() {
           </DialogContent>
         </Dialog>
       </div>
-      <Tabs defaultValue="verified">
+      <Tabs
+        value={status === "Verified" ? "verified" : "blacklisted"}
+        onValueChange={(value) => {
+          setStatus(value === "verified" ? "Verified" : "Blacklisted");
+          setPage(1);
+        }}
+      >
         <TabsList className="mb-6">
           <TabsTrigger value="verified">Verified Companies</TabsTrigger>
           <TabsTrigger value="blacklisted">Blacklisted Companies</TabsTrigger>
         </TabsList>
         <TabsContent value="verified">
-          <CompanyList
-            rows={companies.filter((company) => company.status === "Verified")}
-            status="Verified"
-            onChange={syncCompany}
-          />
+          <CompanyList rows={companies} status="Verified" onChange={syncCompany} />
         </TabsContent>
         <TabsContent value="blacklisted">
-          <CompanyList
-            rows={companies.filter((company) => company.status === "Blacklisted")}
-            status="Blacklisted"
-            onChange={syncCompany}
-          />
+          <CompanyList rows={companies} status="Blacklisted" onChange={syncCompany} />
         </TabsContent>
       </Tabs>
+      {loading ? (
+        <Card className="mt-4 flex justify-center py-6">
+          <Loader2 className="h-5 w-5 animate-spin text-primary" />
+        </Card>
+      ) : error ? (
+        <Card className="mt-4 flex flex-col items-start gap-3 p-4" role="alert">
+          <p>{error}</p>
+          <Button variant="outline" onClick={() => setReload((value) => value + 1)}>
+            Retry
+          </Button>
+        </Card>
+      ) : total === 0 ? (
+        <Card className="mt-4 p-6 text-center text-sm text-muted-foreground">
+          No company records match this tab or search.
+        </Card>
+      ) : (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm">
+          <span className="text-muted-foreground">
+            Page {page} of {totalPages} · {total} companies
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              disabled={page <= 1}
+              onClick={() => setPage((value) => value - 1)}
+            >
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              disabled={page >= totalPages}
+              onClick={() => setPage((value) => value + 1)}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
     </AdminShell>
   );
 }
@@ -164,7 +241,6 @@ function CompanyForm({
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="e.g. TechNova Labs"
-          disabled={mode === "edit"}
         />
       </div>
       <div className="space-y-2">
@@ -213,16 +289,20 @@ function CompanyList({
       return;
     }
 
-    if (action === "Blacklist") {
-      const { company: updated } = await api.updateCompany(company.id, { status: "Blacklisted" });
-      onChange(updated);
-      toast.success(`${company.name} blacklisted.`);
-    } else if (action === "Verify") {
-      const { company: updated } = await api.updateCompany(company.id, { status: "Verified" });
-      onChange(updated);
-      toast.success(`${company.name} verified.`);
-    } else if (action === "Edit") {
-      setDialogState({ open: true, mode: "edit", company });
+    try {
+      if (action === "Blacklist") {
+        const { company: updated } = await api.updateCompany(company.id, { status: "Blacklisted" });
+        onChange(updated);
+        toast.success(`${company.name} blacklisted.`);
+      } else if (action === "Verify") {
+        const { company: updated } = await api.updateCompany(company.id, { status: "Verified" });
+        onChange(updated);
+        toast.success(`${company.name} verified.`);
+      } else if (action === "Edit") {
+        setDialogState({ open: true, mode: "edit", company });
+      }
+    } catch (error) {
+      if (!isRequestAborted(error)) toast.error(`Could not update ${company.name}.`);
     }
   };
 
@@ -286,12 +366,16 @@ function CompanyList({
             <Button
               variant="destructive"
               onClick={async () => {
-                if (confirmDialog.company) {
-                  await api.deleteCompany(confirmDialog.company.id);
-                  onChange(null, confirmDialog.company.id);
-                  toast.success(`${confirmDialog.company.name} deleted.`);
+                try {
+                  if (confirmDialog.company) {
+                    await api.deleteCompany(confirmDialog.company.id);
+                    onChange(null, confirmDialog.company.id);
+                    toast.success(`${confirmDialog.company.name} deleted.`);
+                  }
+                  setConfirmDialog((d) => ({ ...d, open: false }));
+                } catch (error) {
+                  if (!isRequestAborted(error)) toast.error("Failed to delete company.");
                 }
-                setConfirmDialog((d) => ({ ...d, open: false }));
               }}
             >
               Delete
@@ -314,15 +398,19 @@ function CompanyList({
             mode="edit"
             company={editDialog.company}
             onSave={async (name, domain) => {
-              if (editDialog.company) {
-                const { company: updated } = await api.updateCompany(editDialog.company.id, {
-                  name,
-                  domain,
-                });
-                onChange(updated);
-                toast.success(`${name} updated.`);
+              try {
+                if (editDialog.company) {
+                  const { company: updated } = await api.updateCompany(editDialog.company.id, {
+                    name,
+                    domain,
+                  });
+                  onChange(updated);
+                  toast.success(`${name} updated.`);
+                }
+                setDialogState((d) => ({ ...d, open: false }));
+              } catch (error) {
+                if (!isRequestAborted(error)) toast.error(`Failed to update ${name}.`);
               }
-              setDialogState((d) => ({ ...d, open: false }));
             }}
             onCancel={() => setDialogState((d) => ({ ...d, open: false }))}
           />

@@ -1,11 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Navigate, useLocation, useNavigate } from "@tanstack/react-router";
+import { Navigate, useLocation } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { Loader2, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { api, setToken } from "@/lib/api";
+import { api, cancelAuthenticatedRequests, setToken } from "@/lib/api";
+import { AUTH_SESSION_CHANGE_EVENT } from "@/lib/auth-events";
 
 export type Role = "guest" | "user" | "admin";
 
@@ -73,14 +74,47 @@ function persistSession(next: AuthUser | null, token: string | null) {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const userRef = useRef<AuthUser | null>(null);
+  const logoutInFlight = useRef(false);
+
+  const removeUserQueries = useCallback(
+    (userId: string | undefined) => {
+      if (userId) {
+        queryClient.removeQueries({ queryKey: ["user-dashboard", userId], exact: true });
+      }
+    },
+    [queryClient],
+  );
+
+  const applySession = useCallback(
+    (next: AuthUser | null) => {
+      const previous = userRef.current;
+      const changed = previous?.id !== next?.id || previous?.role !== next?.role;
+      if (changed) {
+        cancelAuthenticatedRequests();
+        removeUserQueries(previous?.id);
+        removeUserQueries(next?.id);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent(AUTH_SESSION_CHANGE_EVENT, {
+              detail: { userId: next?.id ?? null },
+            }),
+          );
+        }
+      }
+      userRef.current = next;
+      setUser(next);
+    },
+    [removeUserQueries],
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const stored = safeParseUser(localStorage.getItem(STORAGE_KEY));
+    userRef.current = stored;
     setUser(stored);
     setLoading(false);
   }, []);
@@ -90,31 +124,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (typeof window === "undefined") return;
     const handler = (e: StorageEvent) => {
       if (e.key !== STORAGE_KEY) {
-        // Also handle token key
         if (e.key === "scamshield.auth.token") {
           if (e.newValue === null) {
-            queryClient.clear();
-            setUser(null);
+            applySession(null);
           }
         }
         return;
       }
-      queryClient.clear();
-      setUser(safeParseUser(localStorage.getItem(STORAGE_KEY)));
+      applySession(safeParseUser(localStorage.getItem(STORAGE_KEY)));
     };
     window.addEventListener("storage", handler);
     return () => window.removeEventListener("storage", handler);
-  }, [queryClient]);
+  }, [applySession]);
 
   const persist = useCallback(
     (next: AuthUser | null, token: string | null = null) => {
-      // Drop responses cached under the previous account before changing tokens.
-      queryClient.clear();
-      setUser(next);
+      applySession(next);
+      if (next) logoutInFlight.current = false;
       if (typeof window === "undefined") return;
       persistSession(next, token);
     },
-    [queryClient],
+    [applySession],
   );
 
   const loginInFlight = useRef(false);
@@ -192,12 +222,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const logout = useCallback(() => {
+    if (!userRef.current || logoutInFlight.current) return;
+    logoutInFlight.current = true;
+
+    // Start revocation while the bearer token still exists. It is intentionally
+    // not awaited: local sign-out and route protection must not depend on Render.
+    void api.logout().catch((error: unknown) => {
+      if ((error as { status?: number } | null)?.status !== 401) {
+        toast.info(
+          "You are signed out on this device, but the server could not confirm token revocation.",
+        );
+      }
+    });
     persist(null);
-    // Explicitly leave the protected route as soon as local credentials are cleared.
-    // This avoids depending on a nested protected-layout redirect to finish logout.
-    void navigate({ to: "/", replace: true });
-    toast.info("You have been logged out.");
-  }, [navigate, persist]);
+    toast.success("You have been logged out.");
+  }, [persist]);
 
   const valueMemo: AuthContextValue = {
     user,

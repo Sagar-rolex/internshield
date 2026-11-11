@@ -8,20 +8,25 @@ import logging
 import time
 import uuid
 import json
+import csv
+import io
 from contextlib import asynccontextmanager
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, Depends, HTTPException, Request, Response, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, Request, Response, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy import case, select, update, delete, func
+from sqlalchemy import case, select, update, delete, func, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .database import engine, get_db, Base
 from .models import (
+    AdminAuditLog,
     Analysis,
+    AnalysisImage,
     Company,
     CompanyVerification,
     RevokedToken,
@@ -59,6 +64,14 @@ from .services.ocr import (
     require_readable_text,
 )
 from .services.image_processor import ALLOWED_FORMATS, MAX_IMAGE_BYTES
+from .services.imagekit import (
+    ImageKitConfigurationError,
+    ImageKitServiceError,
+    delete_screenshot,
+    ensure_configured as ensure_imagekit_configured,
+    get_signed_url as get_imagekit_signed_url,
+    upload_screenshot,
+)
 from .auth import (
     hash_password,
     verify_password,
@@ -147,20 +160,40 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="ScamShield API", lifespan=lifespan)
 
-cors_origin_str = os.getenv("CORS_ORIGIN", "").strip()
-cors_origins = [o.strip() for o in cors_origin_str.split(",") if o.strip()]
 APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+cors_origin_str = os.getenv("CORS_ORIGIN", "").strip()
+configured_cors_origins = [
+    origin.strip().rstrip("/")
+    for origin in cors_origin_str.split(",")
+    if origin.strip()
+]
 cors_regex = os.getenv("CORS_ORIGIN_REGEX", "").strip() or None
 
 if APP_ENV == "production":
-    if not cors_origins:
+    if not configured_cors_origins:
         raise RuntimeError("CORS_ORIGIN must list the exact HTTPS frontend origin(s) in production.")
     if cors_regex:
         raise RuntimeError("CORS_ORIGIN_REGEX is disabled in production; use exact origins.")
-    if any(not origin.startswith("https://") or "*" in origin for origin in cors_origins):
-        raise RuntimeError("Production CORS_ORIGIN values must be explicit HTTPS origins.")
-elif not cors_origins:
-    cors_origins = [
+    from urllib.parse import urlsplit
+
+    for origin in configured_cors_origins:
+        parsed_origin = urlsplit(origin)
+        if (
+            parsed_origin.scheme != "https"
+            or not parsed_origin.netloc
+            or parsed_origin.path
+            or parsed_origin.query
+            or parsed_origin.fragment
+            or "*" in origin
+        ):
+            raise RuntimeError(
+                "Production CORS_ORIGIN values must be exact HTTPS origins without paths."
+            )
+    cors_origins = configured_cors_origins
+else:
+    # Local frontend origins must remain available in development even when a
+    # developer's .env.local also contains a deployed frontend origin.
+    development_origins = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:8080",
@@ -168,6 +201,7 @@ elif not cors_origins:
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ]
+    cors_origins = list(dict.fromkeys([*configured_cors_origins, *development_origins]))
 
 if "*" in cors_origins:
     raise RuntimeError("CORS_ORIGIN must contain explicit frontend origins, not '*'.")
@@ -384,14 +418,132 @@ async def logout(
 
 # ── Admin: users ─────────────────────────────────────────────────────────────
 
+def _admin_user_to_dict(account: User) -> dict:
+    """Return account metadata to admins without ever including credentials."""
+    public = public_user(account)
+    public["created_at"] = account.created_at.isoformat() if account.created_at else ""
+    return public
+
+
+def _record_admin_action(
+    db: AsyncSession,
+    actor: User,
+    action: str,
+    entity_type: str,
+    entity_id: str,
+    summary: str,
+) -> None:
+    db.add(
+        AdminAuditLog(
+            id=str(uuid.uuid4()),
+            actor_id=actor.id,
+            actor_email=actor.email,
+            action=action,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            summary=summary[:300],
+        )
+    )
+
+
+def _admin_date_bound(value: date | None, *, end: bool = False) -> datetime | None:
+    if value is None:
+        return None
+    boundary = value + timedelta(days=1) if end else value
+    return datetime.combine(boundary, datetime.min.time())
+
 @app.get("/api/admin/users")
 async def list_users(
+    q: str = Query(default="", max_length=150),
+    status: str | None = Query(default=None),
+    role: str | None = Query(default=None),
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    sort_by: str = Query(default="created_at"),
+    sort_order: str = Query(default="desc"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(User).order_by(User.created_at.desc()))
-    users = [public_user(u) for u in result.scalars().all()]
-    return {"users": users}
+    statement = select(User)
+    count_statement = select(func.count(User.id))
+    if q.strip():
+        search = f"%{q.strip().lower()}%"
+        condition = func.lower(User.name).like(search) | func.lower(User.email).like(search)
+        statement = statement.where(condition)
+        count_statement = count_statement.where(condition)
+    if status:
+        if status not in VALID_USER_STATUS:
+            raise HTTPException(400, "Invalid account status filter.")
+        statement = statement.where(User.status == status)
+        count_statement = count_statement.where(User.status == status)
+    if role:
+        if role not in {"user", "admin"}:
+            raise HTTPException(400, "Invalid role filter.")
+        statement = statement.where(User.role == role)
+        count_statement = count_statement.where(User.role == role)
+    if date_from:
+        bound = _admin_date_bound(date_from)
+        statement = statement.where(User.created_at >= bound)
+        count_statement = count_statement.where(User.created_at >= bound)
+    if date_to:
+        bound = _admin_date_bound(date_to, end=True)
+        statement = statement.where(User.created_at < bound)
+        count_statement = count_statement.where(User.created_at < bound)
+
+    sort_column = {"created_at": User.created_at, "name": User.name, "email": User.email}.get(sort_by)
+    if sort_column is None or sort_order not in {"asc", "desc"}:
+        raise HTTPException(400, "Invalid user sort option.")
+    order_column = sort_column.asc() if sort_order == "asc" else sort_column.desc()
+    total = int((await db.execute(count_statement)).scalar() or 0)
+    rows = (
+        await db.execute(
+            statement.order_by(order_column, User.id).offset((page - 1) * page_size).limit(page_size)
+        )
+    ).scalars().all()
+    return {
+        "users": [_admin_user_to_dict(account) for account in rows],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": (total + page_size - 1) // page_size,
+    }
+
+
+@app.get("/api/admin/users/{user_id}")
+async def get_admin_user(
+    user_id: str,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    target = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if not target:
+        raise HTTPException(404, "User not found.")
+    analyses_count = int((await db.execute(
+        select(func.count(Analysis.id)).where(Analysis.user_id == target.id)
+    )).scalar() or 0)
+    reports_count = int((await db.execute(
+        select(func.count(ScamReportOwner.report_id)).where(ScamReportOwner.user_id == target.id)
+    )).scalar() or 0)
+    checks_count = int((await db.execute(
+        select(func.count(CompanyVerification.id)).where(CompanyVerification.user_id == target.id)
+    )).scalar() or 0)
+    recent_analyses = (
+        await db.execute(
+            select(Analysis).where(Analysis.user_id == target.id)
+            .order_by(Analysis.created_at.desc()).limit(5)
+        )
+    ).scalars().all()
+    return {
+        "user": _admin_user_to_dict(target),
+        "stats": {"analyses": analyses_count, "reports": reports_count, "companyChecks": checks_count},
+        "recentAnalyses": [
+            {"id": row.id, "job_title": row.job_title or "", "company": row.company or "",
+             "risk": row.risk, "created_at": row.created_at.isoformat() if row.created_at else ""}
+            for row in recent_analyses
+        ],
+    }
 
 
 @app.patch("/api/admin/users/{user_id}")
@@ -408,12 +560,30 @@ async def update_user(
     if not target:
         raise HTTPException(404, "User not found.")
     if body.status:
+        if target.role == "admin" and target.status == "Active" and body.status != "Active":
+            active_admins = int((await db.execute(
+                select(func.count(User.id)).where(User.role == "admin", User.status == "Active")
+            )).scalar() or 0)
+            if active_admins <= 1:
+                raise HTTPException(409, "The last active administrator cannot be deactivated.")
         target.status = body.status
+    if body.role:
+        if body.role not in {"user", "admin"}:
+            raise HTTPException(400, "Role must be user or admin.")
+        if target.role == "admin" and body.role == "user" and target.status == "Active":
+            active_admins = int((await db.execute(
+                select(func.count(User.id)).where(User.role == "admin", User.status == "Active")
+            )).scalar() or 0)
+            if active_admins <= 1:
+                raise HTTPException(409, "The last active administrator cannot be demoted.")
+        target.role = body.role
     if body.name:
         target.name = body.name[:100]
+    action = "user.role_updated" if body.role else "user.updated"
+    _record_admin_action(db, user, action, "user", target.id, f"Updated account {target.email}.")
     await db.commit()
     await db.refresh(target)
-    return {"user": public_user(target)}
+    return {"user": _admin_user_to_dict(target)}
 
 
 @app.delete("/api/admin/users/{user_id}")
@@ -425,10 +595,22 @@ async def delete_user(
     target = (await db.execute(select(User).where(User.id == user_id, User.role != "admin"))).scalar_one_or_none()
     if not target:
         raise HTTPException(404, "User not found or is an admin.")
+    analysis_ids = select(Analysis.id).where(Analysis.user_id == target.id)
+    image_file_ids = list((await db.execute(
+        select(AnalysisImage.file_id).where(AnalysisImage.analysis_id.in_(analysis_ids))
+    )).scalars().all())
+    _record_admin_action(db, user, "user.deleted", "user", target.id, f"Deleted account {target.email}.")
     await db.execute(delete(ScamReportOwner).where(ScamReportOwner.user_id == target.id))
     await db.execute(delete(CompanyVerification).where(CompanyVerification.user_id == target.id))
+    await db.execute(delete(AnalysisImage).where(AnalysisImage.analysis_id.in_(analysis_ids)))
+    await db.execute(delete(Analysis).where(Analysis.user_id == target.id))
     await db.delete(target)
     await db.commit()
+    for file_id in image_file_ids:
+        try:
+            await delete_screenshot(file_id)
+        except (ImageKitConfigurationError, ImageKitServiceError):
+            logger.warning("Could not remove an image asset linked to a deleted user account.")
     return {"ok": True}
 
 
@@ -436,15 +618,40 @@ async def delete_user(
 
 @app.get("/api/reports")
 async def list_reports(
+    q: str = Query(default="", max_length=150),
+    status: str | None = Query(default=None),
+    risk_level: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
     user: User = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     statement = select(ScamReport)
+    count_statement = select(func.count(func.distinct(ScamReport.id)))
     if user.role != "admin":
         statement = statement.join(
             ScamReportOwner, ScamReportOwner.report_id == ScamReport.id
         ).where(ScamReportOwner.user_id == user.id)
-    result = await db.execute(statement.order_by(ScamReport.date.desc()))
+        count_statement = count_statement.join(
+            ScamReportOwner, ScamReportOwner.report_id == ScamReport.id
+        ).where(ScamReportOwner.user_id == user.id)
+    if q.strip():
+        search = f"%{q.strip().lower()}%"
+        condition = func.lower(ScamReport.company).like(search) | func.lower(ScamReport.reporter).like(search)
+        statement = statement.where(condition)
+        count_statement = count_statement.where(condition)
+    if status:
+        if status not in VALID_REPORT_STATUS:
+            raise HTTPException(400, "Invalid report status filter.")
+        statement = statement.where(ScamReport.status == status)
+        count_statement = count_statement.where(ScamReport.status == status)
+    if risk_level:
+        if risk_level not in VALID_REPORT_RISK:
+            raise HTTPException(400, "Invalid risk level filter.")
+        statement = statement.where(ScamReport.risk_level == risk_level)
+        count_statement = count_statement.where(ScamReport.risk_level == risk_level)
+    total = int((await db.execute(count_statement)).scalar() or 0)
+    result = await db.execute(statement.order_by(ScamReport.date.desc()).offset((page - 1) * page_size).limit(page_size))
     reports = [
         {
             "id": r.id,
@@ -457,7 +664,7 @@ async def list_reports(
         }
         for r in result.scalars().all()
     ]
-    return {"reports": reports}
+    return {"reports": reports, "total": total, "page": page, "page_size": page_size, "total_pages": (total + page_size - 1) // page_size}
 
 
 @app.post("/api/reports")
@@ -516,6 +723,10 @@ async def update_report(
         target.status = body.status
     if body.riskLevel:
         target.risk_level = body.riskLevel
+    _record_admin_action(
+        db, user, "report.updated", "report", target.id,
+        f"Updated report status/risk for {target.company}.",
+    )
     await db.commit()
     await db.refresh(target)
     return {
@@ -540,6 +751,7 @@ async def delete_report(
     target = (await db.execute(select(ScamReport).where(ScamReport.id == report_id))).scalar_one_or_none()
     if not target:
         raise HTTPException(404, "Report not found.")
+    _record_admin_action(db, user, "report.deleted", "report", target.id, f"Deleted report for {target.company}.")
     await db.delete(target)
     await db.commit()
     return {"ok": True}
@@ -549,9 +761,27 @@ async def delete_report(
 
 @app.get("/api/companies")
 async def list_companies(
+    q: str = Query(default="", max_length=150),
+    status: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(Company).order_by(Company.status, Company.name))
+    statement = select(Company)
+    count_statement = select(func.count(Company.id))
+    if q.strip():
+        search = f"%{q.strip().lower()}%"
+        condition = func.lower(Company.name).like(search) | func.lower(Company.domain).like(search)
+        statement = statement.where(condition)
+        count_statement = count_statement.where(condition)
+    if status:
+        if status not in VALID_COMPANY_STATUS:
+            raise HTTPException(400, "Invalid company status filter.")
+        statement = statement.where(Company.status == status)
+        count_statement = count_statement.where(Company.status == status)
+    total = int((await db.execute(count_statement)).scalar() or 0)
+    result = await db.execute(statement.order_by(Company.status, Company.name).offset((page - 1) * page_size).limit(page_size))
     companies = [
         {
             "id": c.id,
@@ -563,7 +793,7 @@ async def list_companies(
         }
         for c in result.scalars().all()
     ]
-    return {"companies": companies}
+    return {"companies": companies, "total": total, "page": page, "page_size": page_size, "total_pages": (total + page_size - 1) // page_size}
 
 
 @app.post("/api/company-verifications")
@@ -631,6 +861,7 @@ async def create_company(
         reports=0,
     )
     db.add(company)
+    _record_admin_action(db, user, "company.created", "company", company.id, f"Added {company.name} to platform records.")
     await db.commit()
     await db.refresh(company)
     return {
@@ -667,6 +898,10 @@ async def update_company(
     if body.reports is not None:
         target.reports = max(0, int(body.reports))
     target.last_checked = func.now()
+    _record_admin_action(
+        db, user, "company.updated", "company", target.id,
+        f"Updated {target.name}; platform status is {target.status}.",
+    )
     await db.commit()
     await db.refresh(target)
     return {
@@ -690,6 +925,7 @@ async def delete_company(
     target = (await db.execute(select(Company).where(Company.id == company_id))).scalar_one_or_none()
     if not target:
         raise HTTPException(404, "Company not found.")
+    _record_admin_action(db, user, "company.deleted", "company", target.id, f"Removed {target.name} from platform records.")
     await db.delete(target)
     await db.commit()
     return {"ok": True}
@@ -764,6 +1000,7 @@ def _analysis_to_dict(row: Analysis) -> dict:
         "website": row.website or "",
         "description": row.description or "",
         "image_path": row.image_path or "",
+        "has_image": False,
         "extracted_text": row.extracted_text or "",
         "probability": row.probability,
         "risk": row.risk,
@@ -950,7 +1187,11 @@ async def analyze_screenshot_endpoint(
     if not image_bytes:
         raise HTTPException(400, "Please upload a screenshot.")
 
-    # Prepare a stable image reference; persist only after OCR succeeds.
+    try:
+        ensure_imagekit_configured()
+    except ImageKitConfigurationError as exc:
+        raise HTTPException(503, str(exc)) from exc
+
     ext_map = {
         "image/jpeg": ".jpg",
         "image/png": ".png",
@@ -959,7 +1200,6 @@ async def analyze_screenshot_endpoint(
     }
     ext = ext_map.get(content_type, ".jpg")
     image_name = f"{uuid.uuid4().hex}{ext}"
-    image_ref = f"/uploads/{image_name}"
 
     logger.info("Screenshot received: size=%s bytes", len(image_bytes))
 
@@ -998,13 +1238,6 @@ async def analyze_screenshot_endpoint(
     except OCRProcessingError as e:
         logger.error("Screenshot OCR processing failed: %s", e)
         raise HTTPException(500, "OCR could not process this image. Please try another screenshot.") from e
-
-    image_path = UPLOAD_DIR / image_name
-    try:
-        image_path.write_bytes(image_bytes)
-    except OSError as e:
-        logger.exception("Could not store the analyzed screenshot")
-        raise HTTPException(500, "Analysis completed, but the screenshot could not be saved.") from e
 
     # Step 4: Run evidence-based analysis
     evidence_result = analyze_with_evidence(extracted_text)
@@ -1061,7 +1294,7 @@ async def analyze_screenshot_endpoint(
         user_id=user.id,
         input_type="screenshot",
         extracted_text=extracted_text[:10000],
-        image_path=image_ref,
+        image_path="",
         probability=hybrid_result.final_score,
         risk=hybrid_result.risk_level,
         safe=hybrid_result.safe,
@@ -1086,12 +1319,32 @@ async def analyze_screenshot_endpoint(
         ocr_mode=ocr_mode,
     )
     try:
+        stored_image = await upload_screenshot(image_bytes, image_name, user.id)
+    except ImageKitConfigurationError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except ImageKitServiceError as exc:
+        logger.exception("ImageKit screenshot upload failed")
+        raise HTTPException(
+            503, "Screenshot storage is temporarily unavailable. Please try again."
+        ) from exc
+
+    image_asset = AnalysisImage(
+        analysis_id=row.id,
+        file_id=stored_image.file_id,
+        file_path=stored_image.file_path,
+    )
+    try:
         db.add(row)
+        db.add(image_asset)
         await db.commit()
         await db.refresh(row)
     except Exception as e:
         await db.rollback()
         logger.exception("Could not save screenshot analysis to history")
+        try:
+            await delete_screenshot(stored_image.file_id)
+        except (ImageKitConfigurationError, ImageKitServiceError):
+            logger.exception("Could not clean up an unlinked ImageKit screenshot")
         raise HTTPException(
             503,
             "Analysis could not be saved to your history right now. Please try again.",
@@ -1099,6 +1352,7 @@ async def analyze_screenshot_endpoint(
 
     # Step 9: Format response
     response_data = _analysis_to_dict(row)
+    response_data["has_image"] = True
     response_data["rule_score"] = hybrid_result.rule_score
     response_data["ai_score"] = hybrid_result.ai_score
     response_data["final_score"] = hybrid_result.final_score
@@ -1126,7 +1380,84 @@ async def list_analyses(
             select(Analysis).where(Analysis.user_id == user.id).order_by(Analysis.created_at.desc())
         )
     ).scalars().all()
-    return {"analyses": [_analysis_to_dict(r) for r in rows]}
+    image_ids = set()
+    if rows:
+        image_ids = set(
+            (
+                await db.execute(
+                    select(AnalysisImage.analysis_id).where(
+                        AnalysisImage.analysis_id.in_([row.id for row in rows])
+                    )
+                )
+            ).scalars().all()
+        )
+    analyses = []
+    for row in rows:
+        item = _analysis_to_dict(row)
+        item["has_image"] = row.id in image_ids
+        analyses.append(item)
+    return {"analyses": analyses}
+
+
+@app.get("/api/analyses/{analysis_id}/image")
+async def get_analysis_image(
+    analysis_id: str,
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    asset = (
+        await db.execute(
+            select(AnalysisImage)
+            .join(Analysis, Analysis.id == AnalysisImage.analysis_id)
+            .where(Analysis.id == analysis_id, Analysis.user_id == user.id)
+        )
+    ).scalar_one_or_none()
+    if not asset:
+        raise HTTPException(404, "Screenshot not found.")
+
+    try:
+        return {"url": get_imagekit_signed_url(asset.file_path)}
+    except ImageKitConfigurationError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except ImageKitServiceError as exc:
+        raise HTTPException(503, "Could not create a secure screenshot link.") from exc
+
+
+@app.delete("/api/analyses/{analysis_id}/image")
+async def delete_analysis_image(
+    analysis_id: str,
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    asset = (
+        await db.execute(
+            select(AnalysisImage)
+            .join(Analysis, Analysis.id == AnalysisImage.analysis_id)
+            .where(Analysis.id == analysis_id, Analysis.user_id == user.id)
+        )
+    ).scalar_one_or_none()
+    if not asset:
+        raise HTTPException(404, "Screenshot not found.")
+
+    try:
+        await delete_screenshot(asset.file_id)
+    except ImageKitConfigurationError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except ImageKitServiceError as exc:
+        raise HTTPException(503, "Could not delete the stored screenshot. Please retry.") from exc
+
+    try:
+        await db.delete(asset)
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        logging.getLogger("scamshield").exception(
+            "ImageKit screenshot was deleted but its history link could not be removed"
+        )
+        raise HTTPException(
+            503, "Screenshot was deleted, but history could not be updated. Please retry."
+        ) from exc
+    return {"ok": True}
 
 
 class ChatClientDisconnected(Exception):
@@ -1279,7 +1610,7 @@ async def chat(
     }
 
 
-# ── Analytics ────────────────────────────────────────────────────────────────
+# ── User and administrator analytics ────────────────────────────────────────
 
 @app.get("/api/dashboard")
 async def user_dashboard(
@@ -1322,110 +1653,300 @@ async def user_dashboard(
     }
 
 
+def _analytics_bounds(period: str, date_from: date | None, date_to: date | None) -> tuple[datetime | None, datetime | None]:
+    today = datetime.now(timezone.utc).date()
+    if period == "all":
+        return None, None
+    if period == "custom":
+        if date_from is None or date_to is None:
+            raise HTTPException(400, "Custom analytics require date_from and date_to.")
+        if date_from > date_to:
+            raise HTTPException(400, "date_from must not be after date_to.")
+        return _admin_date_bound(date_from), _admin_date_bound(date_to, end=True)
+    if period not in {"today", "7d", "30d", "90d", "year"}:
+        raise HTTPException(400, "Unsupported analytics period.")
+    if period == "today":
+        first_day = today
+    elif period == "7d":
+        first_day = today - timedelta(days=6)
+    elif period == "30d":
+        first_day = today - timedelta(days=29)
+    elif period == "90d":
+        first_day = today - timedelta(days=89)
+    else:
+        first_day = today.replace(month=1, day=1)
+    return _admin_date_bound(first_day), _admin_date_bound(today, end=True)
+
+
+def _analytics_granularity(period: str, start: datetime | None, end: datetime | None) -> str:
+    if period == "today":
+        return "hour"
+    if period in {"7d", "30d"}:
+        return "day"
+    if period == "90d":
+        return "week"
+    if period == "custom" and start and end:
+        span = (end - start).days
+        return "day" if span <= 31 else "week" if span <= 120 else "month"
+    return "month"
+
+
+def _bucket_expression(column, dialect: str, granularity: str):
+    if dialect == "postgresql":
+        return func.date_trunc(granularity, column)
+    formats = {"hour": "%Y-%m-%d %H:00", "day": "%Y-%m-%d", "week": "%Y-%W", "month": "%Y-%m"}
+    return func.strftime(formats[granularity], column)
+
+
+def _bucket_key(value, granularity: str) -> str:
+    if isinstance(value, datetime):
+        if granularity == "hour":
+            return value.strftime("%Y-%m-%d %H:00")
+        if granularity == "day":
+            return value.strftime("%Y-%m-%d")
+        if granularity == "week":
+            return value.strftime("%Y-%W")
+        return value.strftime("%Y-%m")
+    return str(value or "")
+
+
+def _bucket_label(key: str, granularity: str) -> str:
+    try:
+        if granularity == "hour":
+            return datetime.strptime(key, "%Y-%m-%d %H:%M").strftime("%b %d %H:%M")
+        if granularity == "day":
+            return datetime.strptime(key, "%Y-%m-%d").strftime("%b %d")
+        if granularity == "week":
+            year, week = key.split("-", 1)
+            return f"{year} W{int(week) + 1}"
+        return datetime.strptime(key, "%Y-%m").strftime("%b %Y")
+    except (TypeError, ValueError):
+        return key
+
+
+async def _grouped_count(
+    db: AsyncSession, model, column, start, end, granularity: str, *conditions
+) -> dict[str, int]:
+    bucket = _bucket_expression(column, db.get_bind().dialect.name, granularity)
+    statement = select(bucket.label("bucket"), func.count()).select_from(model).where(*conditions)
+    if start:
+        statement = statement.where(column >= start)
+    if end:
+        statement = statement.where(column < end)
+    rows = (await db.execute(statement.group_by(bucket).order_by(bucket))).all()
+    return {_bucket_key(row.bucket, granularity): int(row[1] or 0) for row in rows if row.bucket}
+
+
+async def _risk_category_counts(db: AsyncSession, start, end) -> list[dict]:
+    dialect = db.get_bind().dialect.name
+    conditions = []
+    params: dict[str, object] = {}
+    if start:
+        conditions.append("a.created_at >= :start")
+        params["start"] = start
+    if end:
+        conditions.append("a.created_at < :end")
+        params["end"] = end
+    if dialect == "postgresql":
+        sql = (
+            "SELECT COALESCE(NULLIF(signal.value->>'category', ''), 'Uncategorized') AS category, COUNT(*) AS total "
+            "FROM analyses AS a CROSS JOIN LATERAL jsonb_array_elements(COALESCE(NULLIF(a.signals, '')::jsonb, '[]'::jsonb)) AS signal(value) "
+            "WHERE signal.value->>'triggered' = 'true'"
+        )
+    elif dialect == "sqlite":
+        sql = (
+            "SELECT COALESCE(NULLIF(json_extract(signal.value, '$.category'), ''), 'Uncategorized') AS category, COUNT(*) AS total "
+            "FROM analyses AS a CROSS JOIN json_each(CASE WHEN json_valid(a.signals) THEN a.signals ELSE '[]' END) AS signal "
+            "WHERE json_extract(signal.value, '$.triggered') IN (1, 'true')"
+        )
+    else:
+        return []
+    if conditions:
+        sql += " AND " + " AND ".join(conditions)
+    sql += " GROUP BY category ORDER BY total DESC, category LIMIT 8"
+    rows = (await db.execute(text(sql), params)).all()
+    return [{"category": row.category, "count": int(row.total or 0)} for row in rows]
+
+
+async def _admin_analytics_data(db: AsyncSession, period: str, date_from: date | None, date_to: date | None) -> dict:
+    start, end = _analytics_bounds(period, date_from, date_to)
+    date_filter = lambda column: ([column >= start] if start else []) + ([column < end] if end else [])
+
+    async def count(statement) -> int:
+        return int((await db.execute(statement)).scalar() or 0)
+
+    total_users = await count(select(func.count(User.id)).where(User.role == "user"))
+    active_users = await count(select(func.count(User.id)).where(User.role == "user", User.status == "Active"))
+    inactive_users = await count(select(func.count(User.id)).where(User.role == "user", User.status == "Inactive"))
+    review_users = await count(select(func.count(User.id)).where(User.role == "user", User.status == "Review"))
+    analysis_conditions = date_filter(Analysis.created_at)
+    report_conditions = date_filter(ScamReport.date)
+    verification_conditions = date_filter(CompanyVerification.created_at)
+    jobs = await count(select(func.count(Analysis.id)).where(*analysis_conditions))
+    risk_counts = {}
+    for risk in ("Critical", "High", "Medium", "Low"):
+        risk_counts[risk] = await count(
+            select(func.count(Analysis.id)).where(Analysis.risk == risk, *analysis_conditions)
+        )
+    total_reports = await count(select(func.count(ScamReport.id)).where(*report_conditions))
+    pending_reports = await count(select(func.count(ScamReport.id)).where(ScamReport.status == "Pending", *report_conditions))
+    total_companies = await count(select(func.count(Company.id)))
+    verified_companies = await count(select(func.count(Company.id)).where(Company.status == "Verified"))
+    company_checks = await count(select(func.count(CompanyVerification.id)).where(*verification_conditions))
+    scams_detected = risk_counts["Critical"] + risk_counts["High"]
+
+    period_users = await count(select(func.count(User.id)).where(User.role == "user", *date_filter(User.created_at)))
+    status_rows = (await db.execute(
+        select(ScamReport.status, func.count(ScamReport.id)).where(*report_conditions).group_by(ScamReport.status)
+    )).all()
+    report_statuses = {str(status): int(total or 0) for status, total in status_rows}
+    for status_name in ("Pending", "Review", "Approved", "Rejected"):
+        report_statuses.setdefault(status_name, 0)
+
+    company_status_rows = (await db.execute(
+        select(Company.status, func.count(Company.id)).group_by(Company.status)
+    )).all()
+    company_statuses = {str(status): int(total or 0) for status, total in company_status_rows}
+    for status_name in ("Verified", "Blacklisted"):
+        company_statuses.setdefault(status_name, 0)
+
+    granularity = _analytics_granularity(period, start, end)
+    analysis_series = await _grouped_count(db, Analysis, Analysis.created_at, start, end, granularity)
+    user_series = await _grouped_count(
+        db, User, User.created_at, start, end, granularity, User.role == "user"
+    )
+    report_series = await _grouped_count(db, ScamReport, ScamReport.date, start, end, granularity)
+    scam_series = await _grouped_count(
+        db, Analysis, Analysis.created_at, start, end, granularity,
+        Analysis.risk.in_(("High", "Critical")),
+    )
+    keys = sorted(set(analysis_series) | set(user_series) | set(report_series) | set(scam_series))
+    monthly = [
+        {"bucket": key, "label": _bucket_label(key, granularity), "jobs": analysis_series.get(key, 0),
+         "registrations": user_series.get(key, 0), "reports": report_series.get(key, 0),
+         "scams": scam_series.get(key, 0)}
+        for key in keys
+    ]
+
+    risk_rows = (await db.execute(
+        select(Analysis.risk, func.count(Analysis.id)).where(*analysis_conditions).group_by(Analysis.risk)
+    )).all()
+    actual_risk = {str(risk): int(total or 0) for risk, total in risk_rows}
+    risk_distribution = [{"risk": risk, "count": actual_risk.get(risk, 0)} for risk in ("Low", "Medium", "High", "Critical")]
+    categories = await _risk_category_counts(db, start, end)
+    top_companies = (await db.execute(
+        select(ScamReport.company, func.count(ScamReport.id).label("reports"))
+        .where(*report_conditions).group_by(ScamReport.company)
+        .order_by(func.count(ScamReport.id).desc(), ScamReport.company).limit(5)
+    )).all()
+
+    recent_users = (await db.execute(
+        select(User).where(User.role == "user").order_by(User.created_at.desc()).limit(5)
+    )).scalars().all()
+    recent_reports = (await db.execute(
+        select(ScamReport).order_by(ScamReport.date.desc()).limit(5)
+    )).scalars().all()
+    recent_companies = (await db.execute(
+        select(Company).where(Company.status == "Verified").order_by(Company.last_checked.desc()).limit(5)
+    )).scalars().all()
+    recent_analyses = (await db.execute(
+        select(Analysis).order_by(Analysis.created_at.desc()).limit(5)
+    )).scalars().all()
+    recent_actions = (await db.execute(
+        select(AdminAuditLog).order_by(AdminAuditLog.created_at.desc()).limit(10)
+    )).scalars().all()
+
+    return {
+        "period": period,
+        "dateRange": {"from": start.isoformat() if start else None, "to": (end - timedelta(microseconds=1)).isoformat() if end else None},
+        "granularity": granularity,
+        "cards": {
+            "totalUsers": total_users, "activeUsers": active_users, "inactiveUsers": inactive_users,
+            "reviewUsers": review_users,
+            "newUsers": period_users, "jobsAnalyzed": jobs, "scamsDetected": scams_detected,
+            "highRiskDetections": risk_counts["Critical"] + risk_counts["High"],
+            "mediumRiskDetections": risk_counts["Medium"], "lowRiskDetections": risk_counts["Low"],
+            "totalReports": total_reports, "reportsPending": pending_reports,
+            "verifiedCompanies": verified_companies, "totalCompanies": total_companies,
+            "companyChecks": company_checks,
+            "detectionRate": round((scams_detected / jobs) * 100, 1) if jobs else 0,
+        },
+        "monthly": monthly,
+        "riskDistribution": risk_distribution,
+        "scamCategories": categories,
+        "reportStatusDistribution": [{"status": key, "count": report_statuses[key]} for key in sorted(report_statuses)],
+        "companyStatusDistribution": [{"status": key, "count": company_statuses[key]} for key in sorted(company_statuses)],
+        "topCompanies": [{"company": name, "reports": int(total or 0)} for name, total in top_companies],
+        "recentUsers": [_admin_user_to_dict(account) for account in recent_users],
+        "recentReports": [
+            {"id": row.id, "company": row.company, "reporter": row.reporter,
+             "date": row.date.isoformat() if row.date else "", "status": row.status,
+             "risk_level": row.risk_level, "details": row.details or ""}
+            for row in recent_reports
+        ],
+        "recentCompanies": [
+            {"id": row.id, "name": row.name, "domain": row.domain or "", "status": row.status,
+             "last_checked": row.last_checked.isoformat() if row.last_checked else ""}
+            for row in recent_companies
+        ],
+        "recentAnalyses": [
+            {"id": row.id, "job_title": row.job_title or "", "company": row.company or "",
+             "risk": row.risk, "probability": row.probability,
+             "created_at": row.created_at.isoformat() if row.created_at else ""}
+            for row in recent_analyses
+        ],
+        "recentAdminActions": [
+            {"id": row.id, "actor": row.actor_email, "action": row.action,
+             "entity_type": row.entity_type, "entity_id": row.entity_id,
+             "summary": row.summary, "created_at": row.created_at.isoformat() if row.created_at else ""}
+            for row in recent_actions
+        ],
+    }
+
+
 @app.get("/api/analytics")
 async def analytics(
+    period: str = Query(default="all"),
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    total_users = (await db.execute(
-        select(func.count(User.id)).where(User.role == "user")
-    )).scalar() or 0
-    jobs_analyzed = (await db.execute(select(func.count(Analysis.id)))).scalar() or 0
-    scams_detected = (
-        await db.execute(select(func.count(Analysis.id)).where(Analysis.risk == "High"))
-    ).scalar() or 0
-    pending_reports = (
-        await db.execute(select(func.count(ScamReport.id)).where(ScamReport.status == "Pending"))
-    ).scalar() or 0
-    verified_companies = (await db.execute(
-        select(func.count(Company.id)).where(Company.status == "Verified")
-    )).scalar() or 0
+    return await _admin_analytics_data(db, period, date_from, date_to)
 
-    dialect = db.get_bind().dialect.name
-    if dialect == "postgresql":
-        analysis_month = func.to_char(func.date_trunc("month", Analysis.created_at), "YYYY-MM")
-        report_month = func.to_char(func.date_trunc("month", ScamReport.date), "YYYY-MM")
-    else:
-        analysis_month = func.strftime("%Y-%m", Analysis.created_at)
-        report_month = func.strftime("%Y-%m", ScamReport.date)
 
-    analysis_month_rows = (
-        await db.execute(
-            select(
-                analysis_month.label("month"),
-                func.count(Analysis.id).label("jobs"),
-                func.sum(case((Analysis.risk == "High", 1), else_=0)).label("detected"),
-            )
-            .group_by(analysis_month)
-            .order_by(analysis_month.desc())
-            .limit(6)
-        )
-    ).all()
-    report_month_rows = (
-        await db.execute(
-            select(report_month.label("month"), func.count(ScamReport.id).label("reports"))
-            .group_by(report_month)
-            .order_by(report_month.desc())
-            .limit(6)
-        )
-    ).all()
-    monthly_values: dict[str, dict[str, int]] = {}
-    for row in analysis_month_rows:
-        if row.month:
-            monthly_values[row.month] = {"jobs": int(row.jobs or 0), "detected": int(row.detected or 0), "reports": 0}
-    for row in report_month_rows:
-        if row.month:
-            monthly_values.setdefault(row.month, {"jobs": 0, "detected": 0, "reports": 0})["reports"] = int(row.reports or 0)
-    monthly = [
-        {
-            "month": datetime.strptime(month, "%Y-%m").strftime("%b %Y"),
-            **monthly_values[month],
-        }
-        for month in sorted(monthly_values)[-6:]
-    ]
-
-    risk_rows = (
-        await db.execute(
-            select(Analysis.risk, func.count(Analysis.id))
-            .group_by(Analysis.risk)
-            .order_by(Analysis.risk)
-        )
-    ).all()
-    top_companies = (
-        await db.execute(
-            select(ScamReport.company, func.count(ScamReport.id).label("reports"))
-            .group_by(ScamReport.company)
-            .order_by(func.count(ScamReport.id).desc(), ScamReport.company)
-            .limit(5)
-        )
-    ).all()
-    recent_reports = (
-        await db.execute(select(ScamReport).order_by(ScamReport.date.desc()).limit(5))
-    ).scalars().all()
-
-    return {
-        "cards": {
-            "totalUsers": total_users,
-            "jobsAnalyzed": jobs_analyzed,
-            "scamsDetected": scams_detected,
-            "reportsPending": pending_reports,
-            "verifiedCompanies": verified_companies,
-            "detectionRate": round((scams_detected / jobs_analyzed) * 100, 1) if jobs_analyzed else 0,
-            "monthlyReports": sum(int(value["reports"]) for value in monthly_values.values()),
-        },
-        "monthly": monthly,
-        "riskDistribution": [{"risk": risk, "count": count} for risk, count in risk_rows],
-        "topCompanies": [{"company": name, "reports": count} for name, count in top_companies],
-        "recentReports": [
-            {
-                "id": report.id,
-                "company": report.company,
-                "reporter": report.reporter,
-                "date": str(report.date)[:10] if report.date else "",
-                "status": report.status,
-                "risk_level": report.risk_level,
-                "details": report.details or "",
-            }
-            for report in recent_reports
-        ],
-    }
+@app.get("/api/admin/analytics.csv")
+async def export_admin_analytics(
+    period: str = Query(default="all"),
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    data = await _admin_analytics_data(db, period, date_from, date_to)
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerow(["metric", "value"])
+    writer.writerow(["period", data["period"]])
+    writer.writerow(["date_from", data["dateRange"]["from"] or "all time"])
+    writer.writerow(["date_to", data["dateRange"]["to"] or "all time"])
+    writer.writerow([])
+    for key, value in data["cards"].items():
+        writer.writerow([key, value])
+    writer.writerow([])
+    writer.writerow(["time_bucket", "jobs", "scams_detected_high_or_critical", "registrations", "reports"])
+    for row in data["monthly"]:
+        writer.writerow([row["label"], row["jobs"], row["scams"], row["registrations"], row["reports"]])
+    writer.writerow([])
+    writer.writerow(["risk", "count"])
+    for row in data["riskDistribution"]:
+        writer.writerow([row["risk"], row["count"]])
+    writer.writerow([])
+    writer.writerow(["scam_signal_category", "trigger_count"])
+    for row in data["scamCategories"]:
+        writer.writerow([row["category"], row["count"]])
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="internshield-analytics-{period}.csv"'},
+    )

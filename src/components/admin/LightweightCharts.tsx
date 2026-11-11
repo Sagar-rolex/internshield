@@ -154,7 +154,7 @@ export function DonutTrendChart({ data }: { data: DonutPoint[] }) {
     <div className="grid grid-cols-1 items-center gap-6 sm:grid-cols-[minmax(140px,1fr)_minmax(0,1fr)]">
       <div
         role="img"
-        aria-label={`Category distribution across ${total} reports`}
+        aria-label={`Category distribution across ${total} items`}
         className="mx-auto flex aspect-square w-full max-w-48 items-center justify-center rounded-full p-8"
         style={{ backgroundImage: `conic-gradient(${stops.join(",")})` }}
       >
@@ -172,7 +172,12 @@ export function DonutTrendChart({ data }: { data: DonutPoint[] }) {
               />
               <span className="truncate">{item.label}</span>
             </span>
-            <span className="font-medium tabular-nums">{item.value}%</span>
+            <span className="shrink-0 text-right tabular-nums">
+              <span className="font-medium">{item.value.toLocaleString()}</span>
+              <span className="ml-2 text-xs text-muted-foreground">
+                {total ? `${Math.round((item.value / total) * 100)}%` : "0%"}
+              </span>
+            </span>
           </li>
         ))}
       </ul>

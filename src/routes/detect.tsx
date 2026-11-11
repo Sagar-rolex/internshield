@@ -37,7 +37,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { ProtectedRoute } from "@/components/AuthProvider";
-import { api, type AnalysisResult } from "@/lib/api";
+import { api, isRequestAborted, type AnalysisResult } from "@/lib/api";
 
 export const Route = createFileRoute("/detect")({
   head: () => ({
@@ -222,6 +222,7 @@ function Detect() {
         );
       }
     } catch (err) {
+      if (isRequestAborted(err)) return;
       const msg = err instanceof Error ? err.message : "Analysis failed. Please try again.";
       toast.error(msg);
     } finally {
@@ -274,6 +275,7 @@ function Detect() {
             : `${payload.risk} risk detected — ${payload.probability}% scam probability`,
         );
       } catch (apiError: unknown) {
+        if (isRequestAborted(apiError)) return;
         const msg =
           apiError instanceof Error
             ? apiError.message

@@ -2,7 +2,7 @@
 SQLAlchemy ORM models for the database.
 """
 from datetime import datetime
-from sqlalchemy import String, Text, CheckConstraint, ForeignKey, func
+from sqlalchemy import String, Text, CheckConstraint, ForeignKey, Index, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
 
@@ -123,3 +123,30 @@ class Analysis(Base):
     created_at: Mapped[datetime] = mapped_column(
         server_default=func.now(), nullable=False
     )
+
+
+class AnalysisImage(Base):
+    __tablename__ = "analysis_images"
+
+    analysis_id: Mapped[str] = mapped_column(
+        ForeignKey("analyses.id", ondelete="CASCADE"), primary_key=True
+    )
+    file_id: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    file_path: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class AdminAuditLog(Base):
+    """Small append-only record of sensitive administrator changes."""
+
+    __tablename__ = "admin_audit_logs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    actor_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    actor_email: Mapped[str] = mapped_column(String, nullable=False)
+    action: Mapped[str] = mapped_column(String, nullable=False)
+    entity_type: Mapped[str] = mapped_column(String, nullable=False)
+    entity_id: Mapped[str] = mapped_column(String, nullable=False)
+    summary: Mapped[str] = mapped_column(String(300), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
+
+    __table_args__ = (Index("ix_admin_audit_logs_created_at", "created_at"),)

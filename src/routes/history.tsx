@@ -202,16 +202,39 @@ function HistoryContent() {
               {selected?.company || selected?.job_title || "Analysis"} — {selected?.risk} risk
             </DialogTitle>
           </DialogHeader>
-          {selected && <AnalysisDetail analysis={selected} />}
+          {selected && (
+            <AnalysisDetail
+              key={selected.id}
+              analysis={selected}
+              onImageDeleted={() => {
+                setAnalyses((current) =>
+                  current.map((item) =>
+                    item.id === selected.id ? { ...item, has_image: false } : item,
+                  ),
+                );
+                setSelected((current) => (current ? { ...current, has_image: false } : current));
+              }}
+            />
+          )}
         </DialogContent>
       </Dialog>
     </div>
   );
 }
 
-function AnalysisDetail({ analysis }: { analysis: AnalysisResult }) {
+function AnalysisDetail({
+  analysis,
+  onImageDeleted,
+}: {
+  analysis: AnalysisResult;
+  onImageDeleted: () => void;
+}) {
   return (
     <div className="space-y-4 pt-2">
+      {analysis.has_image && (
+        <ScreenshotArchive analysisId={analysis.id} onImageDeleted={onImageDeleted} />
+      )}
+
       {/* Header scores */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="rounded-lg bg-muted p-3 text-center">
@@ -307,5 +330,73 @@ function AnalysisDetail({ analysis }: { analysis: AnalysisResult }) {
         </ul>
       </div>
     </div>
+  );
+}
+
+function ScreenshotArchive({
+  analysisId,
+  onImageDeleted,
+}: {
+  analysisId: string;
+  onImageDeleted: () => void;
+}) {
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const loadImage = async () => {
+    setLoading(true);
+    try {
+      const { url } = await api.analysisImage(analysisId);
+      setImageUrl(url);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not load the saved screenshot.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteImage = async () => {
+    if (!window.confirm("Delete this saved screenshot? This cannot be undone.")) return;
+    setDeleting(true);
+    try {
+      await api.deleteAnalysisImage(analysisId);
+      setImageUrl(null);
+      onImageDeleted();
+      toast.success("Saved screenshot deleted.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not delete the screenshot.");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <section className="space-y-3 rounded-lg border p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-sm font-semibold">Saved screenshot</div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={loadImage} disabled={loading}>
+            {loading ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <ImageIcon className="mr-2 h-4 w-4" />
+            )}
+            {imageUrl ? "Refresh image" : "View image"}
+          </Button>
+          <Button variant="destructive" size="sm" onClick={deleteImage} disabled={deleting}>
+            {deleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Delete image
+          </Button>
+        </div>
+      </div>
+      {imageUrl && (
+        <img
+          src={imageUrl}
+          alt="Saved job posting screenshot"
+          className="max-h-96 w-full rounded-md border object-contain"
+        />
+      )}
+    </section>
   );
 }
